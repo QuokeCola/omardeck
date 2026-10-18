@@ -83,31 +83,60 @@ Item {
   }
 
   // ----------------------------------------------------------- window state
-  property var clients: []
+  // Read from Quickshell's own Hyprland connection: requests go over the
+  // socket in-process, titles and the active window arrive as events. (It
+  // used to run bash + 3x hyprctl per event — ~3.5% CPU while a terminal
+  // title spinner ticked.)
+  property var clients: []     // plain objects; `tl` is the live toplevel
   property var monitors: []
-  property string activeAddress: ""
+  readonly property string activeAddress: Hyprland.activeToplevel ? "0x" + Hyprland.activeToplevel.address : ""
 
-  Process {
-    id: stateProc
-    command: ["bash", "-c", "hyprctl -j clients; echo; echo @@; hyprctl -j monitors; echo; echo @@; hyprctl -j activewindow"]
-    stdout: StdioCollector { onStreamFinished: root.parseState(text) }
+  // Most recently focused first, kept from focus events rather than asking
+  // Hyprland for focusHistoryID on every focus change.
+  property var mru: []
+  onActiveAddressChanged: {
+    if (!root.activeAddress) return
+    var next = root.mru.filter(function(a) { return a !== root.activeAddress })
+    next.unshift(root.activeAddress)
+    root.mru = next.slice(0, 64)
   }
 
-  function parseState(raw) {
-    var parts = String(raw).split("\n@@\n")
-    try { root.clients = JSON.parse(parts[0]) } catch (e) {}
-    try { root.monitors = JSON.parse(parts[1]) } catch (e) {}
-    try { root.activeAddress = String((JSON.parse(parts[2]) || {}).address || "") } catch (e) { root.activeAddress = "" }
-    root.rebuild()
-  }
-
+  // Ask for fresh geometry/workspaces only when they can have changed.
+  readonly property var refreshEvents: ["openwindow", "closewindow", "movewindow", "movewindowv2",
+    "changefloatingmode", "fullscreen", "workspace", "workspacev2", "focusedmon", "focusedmonv2",
+    "moveworkspace", "moveworkspacev2", "activespecial", "activespecialv2", "monitoradded",
+    "monitoraddedv2", "monitorremoved", "monitorremovedv2", "togglegroup", "moveintogroup",
+    "moveoutofgroup", "pin", "minimized", "configreloaded"]
   function refresh() { refreshTimer.restart() }
   Timer {
     id: refreshTimer
     interval: 30
-    onTriggered: if (!stateProc.running) stateProc.running = true; else root.refresh()
+    onTriggered: { Hyprland.refreshToplevels(); Hyprland.refreshMonitors() }
   }
   Component.onCompleted: refresh()
+
+  function scheduleRebuild() { Qt.callLater(root.rebuild) }
+  Instantiator {
+    model: Hyprland.toplevels
+    delegate: Connections {
+      required property var modelData
+      target: modelData
+      function onLastIpcObjectChanged() { root.scheduleRebuild() }
+    }
+  }
+  Instantiator {
+    model: Hyprland.monitors
+    delegate: Connections {
+      required property var modelData
+      target: modelData
+      function onLastIpcObjectChanged() { root.scheduleRebuild() }
+      function onActiveWorkspaceChanged() { root.scheduleRebuild() }
+    }
+  }
+  Connections {
+    target: Hyprland.toplevels
+    function onValuesChanged() { root.scheduleRebuild() }
+  }
 
   // The dock shares the Overlay layer with Aerial's full-screen surface so a
   // desktop swipe doesn't paint over it. On one layer the last surface mapped
@@ -125,17 +154,13 @@ Item {
     target: Hyprland
     function onRawEvent(event) {
       var n = event.name
-      if (n === "openlayer" || n === "closelayer" || n === "activelayout" || n === "windowtitle") {
-        if (n === "windowtitle") root.refresh()
-        if (n === "openlayer" && String(event.data).trim() === "omarchy-aerial") root.restack()
-        return
-      }
-      root.refresh()
+      if (n === "openlayer" && String(event.data).trim() === "omarchy-aerial") root.restack()
+      else if (root.refreshEvents.indexOf(n) >= 0) root.refresh()
     }
   }
 
   // Dragging a floating window emits no event, so poll slowly while one is on
-  // a visible workspace.
+  // a visible workspace (a socket request, no process).
   property bool floatingVisible: false
   Timer {
     interval: 1200
@@ -169,7 +194,7 @@ Item {
     var e = entryFor(key)
     if (e && e.name) return e.name
     var w = root.windowsByKey[key]
-    if (w && w.length) return w[0].title || w[0].class
+    if (w && w.length) return (w[0].tl ? w[0].tl.title : "") || w[0].class
     return key.replace(/^class:/, "")
   }
 
@@ -187,7 +212,57 @@ Item {
   property var items: []       // [{ key, separator }]
   property string itemsSig: ""
 
+  property string clientsSig: ""
+  property string monitorsSig: ""
+  property string windowsSig: ""
+
+  function snapshot() {
+    var mons = []
+    var ms = Hyprland.monitors.values || []
+    for (var m = 0; m < ms.length; m++) {
+      var hm = ms[m]
+      var ipc = hm.lastIpcObject || {}
+      mons.push({
+        id: hm.id, name: hm.name,
+        activeWorkspace: { id: hm.activeWorkspace ? hm.activeWorkspace.id : (ipc.activeWorkspace ? ipc.activeWorkspace.id : -999) },
+        specialWorkspace: { id: ipc.specialWorkspace ? ipc.specialWorkspace.id : 0 }
+      })
+    }
+    var sigM = JSON.stringify(mons)
+    if (sigM !== root.monitorsSig) { root.monitorsSig = sigM; root.monitors = mons }
+
+    var cl = []
+    var ts = Hyprland.toplevels.values || []
+    for (var i = 0; i < ts.length; i++) {
+      var o = ts[i].lastIpcObject || {}
+      if (!o.class || !o.address) continue
+      cl.push({
+        address: o.address, class: o.class, mapped: o.mapped !== false, hidden: !!o.hidden,
+        workspace: { id: o.workspace ? o.workspace.id : 0, name: o.workspace ? String(o.workspace.name) : "" },
+        monitor: o.monitor, at: o.at || [0, 0], size: o.size || [0, 0],
+        floating: !!o.floating, fullscreen: o.fullscreen || 0, focusHistoryID: o.focusHistoryID || 0
+      })
+    }
+    var sigC = JSON.stringify(cl)
+    var changed = sigC !== root.clientsSig
+    if (changed) {
+      root.clientsSig = sigC
+      // The live toplevel rides along for titles (not part of the signature).
+      for (var j = 0; j < cl.length; j++) {
+        for (var t = 0; t < ts.length; t++)
+          if ((ts[t].lastIpcObject || {}).address === cl[j].address) { cl[j].tl = ts[t]; break }
+      }
+      root.clients = cl
+    }
+  }
+
+  function mruRank(addr, fallback) {
+    var i = root.mru.indexOf(addr)
+    return i >= 0 ? i : 1000 + fallback
+  }
+
   function rebuild() {
+    root.snapshot()
     var byKey = {}
     var floating = false
     var visibleWs = {}
@@ -204,9 +279,19 @@ Item {
       byKey[key].push(c)
       if (c.floating && visibleWs[c.workspace.id]) floating = true
     }
-    for (var k in byKey) byKey[k].sort(function(a, b) { return a.focusHistoryID - b.focusHistoryID })
+    for (var k in byKey) byKey[k].sort(function(a, b) {
+      return root.mruRank(a.address, a.focusHistoryID) - root.mruRank(b.address, b.focusHistoryID)
+    })
     root.floatingVisible = floating
-    root.windowsByKey = byKey
+    var sigW = JSON.stringify(Object.keys(byKey).sort().map(function(k) {
+      return [k, byKey[k].map(function(w) { return w.address + "@" + w.workspace.id })]
+    })) + "|" + root.clientsSig.length + root.clientsSig.slice(-64)
+    if (sigW !== root.windowsSig) { root.windowsSig = sigW; root.windowsByKey = byKey }
+    else {
+      // Same windows; only the most-recent order may differ. Re-sort in place
+      // so activate() picks the right one without waking every binding.
+      for (var k3 in byKey) root.windowsByKey[k3] = byKey[k3]
+    }
 
     var order = root.runningOrder.filter(function(k) { return !!byKey[k] })
     for (var k2 in byKey) if (order.indexOf(k2) < 0) order.push(k2)
@@ -719,7 +804,7 @@ Item {
                 model: menu.wins
                 MenuRow {
                   required property var modelData
-                  label: modelData.title || modelData.class
+                  label: (modelData.tl ? modelData.tl.title : "") || modelData.class
                   current: modelData.address === root.activeAddress
                   badge: modelData.workspace && modelData.workspace.id > 0 ? String(modelData.workspace.name) : ""
                   onTriggered: menu.run(function() { root.focusWindow(modelData.address) })
