@@ -350,16 +350,16 @@ Item {
           Item {
             id: slider
             anchors.fill: parent
-            // Heavy slide: rises, carries a little past its rest line and
-            // settles back; sinks by easing out of rest, then accelerating away.
+            // Slide in: cubic-bezier(0.2, 0, 0, 1). Slide out: cubic-bezier(1, 0, 0.8, 1).
             readonly property real hiddenOffset: root.edgeGap + root.dockHeight + 6
             property real offset: panel.revealed ? 0 : hiddenOffset
             Behavior on offset {
               NumberAnimation {
                 duration: panel.revealed ? 620 : 420
-                easing.type: panel.revealed ? Easing.OutBack : Easing.BezierSpline
-                easing.overshoot: 0.8
-                easing.bezierCurve: [0.55, 0, 0.75, 0.2, 1, 1]
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: panel.revealed
+                  ? [0.2, 0, 0, 1, 1, 1]
+                  : [1, 0, 0.8, 1, 1, 1]
               }
             }
             transform: Translate { y: slider.offset }
