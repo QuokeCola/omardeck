@@ -38,6 +38,9 @@ Item {
   readonly property int dockHeight: iconSize + padding + Math.max(padding, dotRow + 3)
   readonly property int edgeGap: Math.max(4, Style.gapsOut * 2)
   readonly property int separatorWidth: spacing + 1
+  // Edge strip that reveals a hidden dock. Kept a few px tall: thinner input
+  // regions get lost to rounding at fractional scale.
+  readonly property int triggerHeight: 4
 
   FileView {
     id: configFile
@@ -315,166 +318,175 @@ Item {
 
         // Input: the dock itself (plus the magnified icons while hovered), or a
         // thin strip at the screen edge while hidden.
-        mask: Region { item: hitbox }
-        Item {
-          id: hitbox
-          x: dock.x
-          width: dock.width
-          y: panel.revealed ? (panel.hovered ? dock.y - root.iconSize * (root.magnify - 1) : dock.y) : panel.height - 3
-          height: panel.height - y
+        // Plain numeric bindings: a Region tracking an item didn't follow the
+        // item's later moves, so the hidden-state strip never took input.
+        readonly property real hitTop: revealed
+          ? (hovered ? dock.y - root.iconSize * (root.magnify - 1) : dock.y)
+          : height - root.triggerHeight
+        mask: Region {
+          x: Math.floor(dock.x)
+          y: Math.floor(panel.hitTop)
+          width: Math.ceil(dock.width)
+          height: Math.ceil(panel.height - panel.hitTop)
         }
 
-        HoverHandler {
-          id: hover
-          onHoveredChanged: panel.hovered = hovered
-        }
         // Mouse x in the dock's un-magnified coordinates.
-        readonly property real pointerX: hover.point.position.x - (dock.x + dock.width / 2) + root.baseWidth / 2
+        readonly property real pointerX: frame.mouseX - (dock.x + dock.width / 2) + root.baseWidth / 2
 
-        Item {
-          id: slider
+        // Hover tracking lives on an Item that contains the dock: a handler
+        // declared straight on the PanelWindow never receives events.
+        MouseArea {
+          id: frame
           anchors.fill: parent
-          property real offset: panel.revealed ? 0 : root.edgeGap + root.dockHeight + 6
-          Behavior on offset {
-            NumberAnimation {
-              duration: panel.revealed ? 280 : 200
-              easing.type: panel.revealed ? Easing.OutQuint : Easing.InCubic
+          hoverEnabled: true
+          acceptedButtons: Qt.NoButton
+          onContainsMouseChanged: panel.hovered = containsMouse
+
+          Item {
+            id: slider
+            anchors.fill: parent
+            property real offset: panel.revealed ? 0 : root.edgeGap + root.dockHeight + 6
+            Behavior on offset {
+              NumberAnimation {
+                duration: panel.revealed ? 280 : 200
+                easing.type: panel.revealed ? Easing.OutQuint : Easing.InCubic
+              }
             }
-          }
-          transform: Translate { y: slider.offset }
-          opacity: panel.revealed ? 1 : 0
-          Behavior on opacity { NumberAnimation { duration: panel.revealed ? 160 : 220 } }
+            transform: Translate { y: slider.offset }
+            opacity: panel.revealed ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: panel.revealed ? 160 : 220 } }
 
-          Rectangle {
-            id: dock
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: root.edgeGap
-            height: root.dockHeight
-            width: row.width + root.padding * 2
-            radius: Math.min(14, Style.cornerRadius)
-            color: Color.bar.background
-            border.width: 1
-            border.color: Util.alpha(Color.bar.text, 0.12)
-          }
+            Rectangle {
+              id: dock
+              anchors.horizontalCenter: parent.horizontalCenter
+              anchors.bottom: parent.bottom
+              anchors.bottomMargin: root.edgeGap
+              height: root.dockHeight
+              width: row.width + root.padding * 2
+              radius: Math.min(14, Style.cornerRadius)
+              color: Color.bar.background
+              border.width: 1
+              border.color: Util.alpha(Color.bar.text, 0.12)
+            }
 
-          Row {
-            id: row
-            anchors.horizontalCenter: dock.horizontalCenter
-            anchors.bottom: dock.bottom
-            anchors.bottomMargin: dock.height - root.padding - root.iconSize
-            spacing: root.spacing
+            Row {
+              id: row
+              anchors.horizontalCenter: dock.horizontalCenter
+              anchors.bottom: dock.bottom
+              anchors.bottomMargin: dock.height - root.padding - root.iconSize
+              spacing: root.spacing
 
-            Repeater {
-              model: root.items
+              Repeater {
+                model: root.items
 
-              delegate: Item {
-                id: cell
-                required property var modelData
-                required property int index
-                readonly property string key: modelData.key
-                readonly property bool isSep: modelData.separator
-                readonly property var wins: root.windowsByKey[key] || []
-                readonly property bool isActive: {
-                  for (var i = 0; i < wins.length; i++) if (wins[i].address === root.activeAddress) return true
-                  return false
-                }
+                delegate: Item {
+                  id: cell
+                  required property var modelData
+                  required property int index
+                  readonly property string key: modelData.key
+                  readonly property bool isSep: modelData.separator
+                  readonly property var wins: root.windowsByKey[key] || []
+                  readonly property bool isActive: {
+                    for (var i = 0; i < wins.length; i++) if (wins[i].address === root.activeAddress) return true
+                    return false
+                  }
 
-                readonly property real target: {
-                  if (isSep || !panel.hovered || root.magnify <= 1 || panel.menuKey !== "") return 1
-                  var d = (panel.pointerX - (root.baseCenters[index] || 0)) / (root.iconSize + root.spacing)
-                  return 1 + (root.magnify - 1) * Math.exp(-d * d / 1.6)
-                }
-                property real zoom: target
-                Behavior on zoom { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
+                  readonly property real target: {
+                    if (isSep || !panel.hovered || root.magnify <= 1 || panel.menuKey !== "") return 1
+                    var d = (panel.pointerX - (root.baseCenters[index] || 0)) / (root.iconSize + root.spacing)
+                    return 1 + (root.magnify - 1) * Math.exp(-d * d / 1.6)
+                  }
+                  property real zoom: target
+                  Behavior on zoom { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
 
-                width: isSep ? root.separatorWidth : root.iconSize * zoom
-                height: isSep ? root.iconSize : root.iconSize * zoom
-                anchors.bottom: parent.bottom
+                  width: isSep ? root.separatorWidth : root.iconSize * zoom
+                  height: isSep ? root.iconSize : root.iconSize * zoom
+                  anchors.bottom: parent.bottom
 
-                Rectangle {
-                  visible: cell.isSep
-                  anchors.centerIn: parent
-                  width: 1
-                  height: root.iconSize * 0.7
-                  color: Util.alpha(Color.bar.text, 0.2)
-                }
+                  Rectangle {
+                    visible: cell.isSep
+                    anchors.centerIn: parent
+                    width: 1
+                    height: root.iconSize * 0.7
+                    color: Util.alpha(Color.bar.text, 0.2)
+                  }
 
-                IconImage {
-                  id: icon
-                  visible: !cell.isSep
-                  width: parent.width
-                  height: parent.height
-                  y: -cell.hop
-                  source: cell.isSep ? "" : root.iconFor(cell.key)
-                  asynchronous: true
-                  mipmap: true
-                  opacity: mouse.pressed ? 0.7 : 1
-                }
+                  IconImage {
+                    id: icon
+                    visible: !cell.isSep
+                    width: parent.width
+                    height: parent.height
+                    y: -cell.hop
+                    source: cell.isSep ? "" : root.iconFor(cell.key)
+                    asynchronous: true
+                    mipmap: true
+                    opacity: mouse.pressed ? 0.7 : 1
+                  }
 
-                // Launch feedback: hop until a window shows up (or ~2.5s).
-                property real hop: 0
-                SequentialAnimation {
-                  id: bounce
-                  loops: 3
-                  NumberAnimation { target: cell; property: "hop"; to: root.iconSize * 0.3; duration: 280; easing.type: Easing.OutQuad }
-                  NumberAnimation { target: cell; property: "hop"; to: 0; duration: 340; easing.type: Easing.OutBounce }
-                }
-                Connections {
-                  target: root
-                  function onLaunched(k) { if (k === cell.key && !cell.isSep) bounce.restart() }
-                }
-                onWinsChanged: if (wins.length && bounce.running) { bounce.stop(); hop = 0 }
+                  // Launch feedback: hop until a window shows up (or ~2.5s).
+                  property real hop: 0
+                  SequentialAnimation {
+                    id: bounce
+                    loops: 3
+                    NumberAnimation { target: cell; property: "hop"; to: root.iconSize * 0.3; duration: 280; easing.type: Easing.OutQuad }
+                    NumberAnimation { target: cell; property: "hop"; to: 0; duration: 340; easing.type: Easing.OutBounce }
+                  }
+                  Connections {
+                    target: root
+                    function onLaunched(k) { if (k === cell.key && !cell.isSep) bounce.restart() }
+                  }
+                  onWinsChanged: if (wins.length && bounce.running) { bounce.stop(); hop = 0 }
 
-                Row {
-                  visible: !cell.isSep
-                  anchors.horizontalCenter: parent.horizontalCenter
-                  anchors.top: parent.bottom
-                  anchors.topMargin: Math.max(2, (root.dockHeight - root.padding - root.iconSize - 4) / 2 - 1)
-                  spacing: 3
-                  Repeater {
-                    model: Math.min(3, cell.wins.length)
-                    Rectangle {
-                      width: 4
-                      height: 4
-                      radius: 2
-                      color: cell.isActive ? Color.accent : Util.alpha(Color.bar.text, 0.6)
+                  Row {
+                    visible: !cell.isSep
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.bottom
+                    anchors.topMargin: Math.max(2, (root.dockHeight - root.padding - root.iconSize - 4) / 2 - 1)
+                    spacing: 3
+                    Repeater {
+                      model: Math.min(3, cell.wins.length)
+                      Rectangle {
+                        width: 4
+                        height: 4
+                        radius: 2
+                        color: cell.isActive ? Color.accent : Util.alpha(Color.bar.text, 0.6)
+                      }
                     }
                   }
-                }
 
-                Rectangle {
-                  id: tip
-                  visible: !cell.isSep && mouse.containsMouse && panel.menuKey === "" && !mouse.pressed
-                  anchors.horizontalCenter: parent.horizontalCenter
-                  anchors.bottom: icon.top
-                  anchors.bottomMargin: 8
-                  width: tipText.implicitWidth + 16
-                  height: tipText.implicitHeight + 8
-                  radius: Math.min(6, Style.cornerRadius)
-                  color: Color.tooltip.background
-                  border.width: 1
-                  border.color: Util.alpha(Color.tooltip.border, 0.3)
-                  Text {
-                    id: tipText
-                    anchors.centerIn: parent
-                    text: cell.isSep ? "" : root.nameFor(cell.key)
-                    color: Color.tooltip.text
-                    font.pixelSize: Style.font.body
+                  Rectangle {
+                    id: tip
+                    visible: !cell.isSep && mouse.containsMouse && panel.menuKey === "" && !mouse.pressed
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.bottom: icon.top
+                    anchors.bottomMargin: 8
+                    width: tipText.implicitWidth + 16
+                    height: tipText.implicitHeight + 8
+                    radius: Math.min(6, Style.cornerRadius)
+                    color: Color.tooltip.background
+                    border.width: 1
+                    border.color: Util.alpha(Color.tooltip.border, 0.3)
+                    Text {
+                      id: tipText
+                      anchors.centerIn: parent
+                      text: cell.isSep ? "" : root.nameFor(cell.key)
+                      color: Color.tooltip.text
+                      font.pixelSize: Style.font.body
+                    }
                   }
-                }
 
-                MouseArea {
-                  id: mouse
-                  enabled: !cell.isSep
-                  anchors.fill: parent
-                  anchors.margins: -root.spacing / 2
-                  hoverEnabled: true
-                  acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
-                  onClicked: function(ev) {
-                    if (ev.button === Qt.LeftButton) root.activate(cell.key)
-                    else if (ev.button === Qt.MiddleButton) root.launch(cell.key)
-                    else panel.openMenu(cell)
+                  MouseArea {
+                    id: mouse
+                    enabled: !cell.isSep
+                    anchors.fill: parent
+                    anchors.margins: -root.spacing / 2
+                    hoverEnabled: true
+                    acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+                    onClicked: function(ev) {
+                      if (ev.button === Qt.LeftButton) root.activate(cell.key)
+                      else if (ev.button === Qt.MiddleButton) root.launch(cell.key)
+                      else panel.openMenu(cell)
+                    }
                   }
                 }
               }
