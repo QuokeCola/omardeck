@@ -178,9 +178,11 @@ Item {
 
   // ------------------------------------------------------------- app model
   property var idCache: ({})
+  // A desktop-entry scan reports each entry separately (~100 at startup):
+  // coalesce into one rebuild.
   Connections {
     target: DesktopEntries.applications
-    function onValuesChanged() { root.idCache = ({}); root.rebuild() }
+    function onValuesChanged() { root.idCache = ({}); root.scheduleRebuild() }
   }
 
   function keyForClass(cls) {
