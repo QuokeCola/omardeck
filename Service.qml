@@ -350,7 +350,7 @@ Item {
           Item {
             id: slider
             anchors.fill: parent
-            // Slide in: cubic-bezier(0.2, 0, 0, 1). Slide out: cubic-bezier(1, 0, 0.8, 1).
+            // Slide in: cubic-bezier(1, 0, 0.8, 1). Slide out: cubic-bezier(0.2, 0, 0, 1).
             readonly property real hiddenOffset: root.edgeGap + root.dockHeight + 6
             property real offset: panel.revealed ? 0 : hiddenOffset
             Behavior on offset {
@@ -358,8 +358,8 @@ Item {
                 duration: panel.revealed ? 620 : 420
                 easing.type: Easing.BezierSpline
                 easing.bezierCurve: panel.revealed
-                  ? [0.2, 0, 0, 1, 1, 1]
-                  : [1, 0, 0.8, 1, 1, 1]
+                  ? [1, 0, 0.8, 1, 1, 1]
+                  : [0.2, 0, 0, 1, 1, 1]
               }
             }
             transform: Translate { y: slider.offset }
