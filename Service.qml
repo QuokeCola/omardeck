@@ -18,6 +18,9 @@ import qs.Ui
 //   height    panel height in px (independent of iconSize)
 //   magnify   hovered icon scale (1 = off)
 //   autohide  "smart" (hide when a window overlaps), "always", "never"
+//   windowPicker  clicking an app with several windows: "aerial" opens
+//             Aerial's overview on just that app's windows; "cycle" focuses
+//             them in turn
 Item {
   id: root
   width: 0
@@ -32,6 +35,7 @@ Item {
   readonly property var pinned: Array.isArray(config.pinned) ? config.pinned : []
   readonly property int iconSize: Math.max(24, Number(config.iconSize) || 38)
   readonly property real magnify: Math.max(1, Math.min(2, Number(config.magnify) || 1.45))
+  readonly property string windowPicker: config.windowPicker === "cycle" ? "cycle" : "aerial"
   readonly property string autohide: ["smart", "always", "never"].indexOf(config.autohide) >= 0 ? config.autohide : "smart"
 
   // The panel's height is set on its own, so smaller icons get more air
@@ -262,6 +266,12 @@ Item {
   function activate(key) {
     var wins = root.windowsByKey[key] || []
     if (!wins.length) { root.launch(key); return }
+    // Several windows: let Aerial lay them out to pick from; choosing one
+    // takes you to its desktop the way the overview always does.
+    if (wins.length > 1 && root.windowPicker === "aerial") {
+      Hyprland.dispatch('hl.dsp.event("aerial,app:' + String(wins[0].class).replace(/[^A-Za-z0-9._-]/g, "") + '")')
+      return
+    }
     var idx = -1
     for (var i = 0; i < wins.length; i++) if (wins[i].address === root.activeAddress) idx = i
     if (idx < 0) { root.focusWindow(wins[0].address); return }
