@@ -333,7 +333,8 @@ Item {
   }
 
   // ---------------------------------------------------------------- actions
-  function hypr(lua) { Quickshell.execDetached(["hyprctl", "dispatch", lua]) }
+  // Over the shell's own socket connection: no hyprctl process per click.
+  function hypr(lua) { Hyprland.dispatch(lua) }
   function focusWindow(addr) { root.hypr('hl.dsp.focus({ window = "address:' + addr + '" })') }
   function closeWindow(addr) { root.hypr('hl.dsp.window.close({ window = "address:' + addr + '" })') }
 
