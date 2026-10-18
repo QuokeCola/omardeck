@@ -7,9 +7,10 @@ running apps.
 - Up to three dots per app for open windows; the focused app's dots use the accent color
 - Smart auto-hide: hides only while a window on that monitor's visible workspace
   covers the dock (or one is fullscreen); touch the bottom edge to reveal
-- Hover magnification and name tooltips; launch bounce
+- Name tooltips, launch bounce, optional hover magnification
 - Left click: launch / focus / cycle windows. Middle click: new window.
-  Right click: window list, New Window, Pin/Unpin, Close
+  Right click: menu with the app's windows (and their workspaces), New Window,
+  Keep in Dock / Unpin, Close
 
 Enable by adding `{ "id": "quokecola.dock" }` to `plugins` in
 `~/.config/omarchy/shell.json`, then `omarchy restart shell`.
@@ -27,6 +28,11 @@ Enable by adding `{ "id": "quokecola.dock" }` to `plugins` in
 }
 ```
 
-`autohide`: `smart`, `always` or `never`.
+`autohide`: `smart`, `always` or `never`. `magnify`: hovered-icon scale, `1` turns it off.
 
-Blur: add `omarchy-dock` to a Hyprland `layer_rule` with `blur = true`.
+The dock announces how much of each screen's bottom edge it covers on
+Hyprland's event socket as `custom>>dock-state,<monitor>,<px>` (0 when hidden);
+the Aerial fork lifts its desktop-swipe dots above it.
+
+Blur: a Hyprland `layer_rule` for `omarchy-dock` with `blur = true` and
+`blur_popups = true` (the right-click menu is an xdg popup).

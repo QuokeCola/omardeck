@@ -5,6 +5,7 @@ import Quickshell.Hyprland
 import Quickshell.Wayland
 import Quickshell.Widgets
 import qs.Commons
+import qs.Ui
 
 // Bottom dock: pinned apps, then running apps that aren't pinned. Window state
 // comes from `hyprctl -j` (refreshed on Hyprland events), so window geometry is
@@ -105,7 +106,10 @@ Item {
   // fullscreen window) and once shortly after start.
   property bool remapping: false
   function restack() { root.remapping = true; remapTimer.restart() }
-  Timer { id: remapTimer; interval: 50; onTriggered: root.remapping = false }
+  // Also the moment to re-announce the dock's size: Aerial may just have
+  // started and missed it.
+  signal restackDone()
+  Timer { id: remapTimer; interval: 50; onTriggered: { root.remapping = false; root.restackDone() } }
   Timer { interval: 2000; running: true; onTriggered: root.restack() }
 
   Connections {
@@ -312,6 +316,20 @@ Item {
         readonly property bool revealed: !wantHidden || hovered || lingering || menuKey !== ""
 
         onHoveredChanged: if (!hovered) { lingering = true; lingerTimer.restart() }
+
+        // Tell other shell plugins how much of this screen's bottom edge the
+        // dock covers (0 when hidden), on Hyprland's event socket:
+        // custom>>dock-state,<monitor>,<px>. Aerial lifts its desktop dots
+        // above it.
+        readonly property int covers: revealed && visible ? Math.ceil(root.edgeGap + root.dockHeight) : 0
+        function announce() {
+          Hyprland.dispatch('hl.dsp.event("dock-state,' + modelData.name + ',' + panel.covers + '")')
+        }
+        onCoversChanged: announce()
+        Connections {
+          target: root
+          function onRestackDone() { panel.announce() }
+        }
         Timer { id: lingerTimer; interval: 350; onTriggered: panel.lingering = false }
 
         // Over a fullscreen window, unmap once slid away: any surface above
@@ -539,6 +557,7 @@ Item {
                     hoverEnabled: true
                     acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
                     onClicked: function(ev) {
+                      if (ev.button !== Qt.RightButton) panel.closeMenu()
                       if (ev.button === Qt.LeftButton) root.activate(cell.key)
                       else if (ev.button === Qt.MiddleButton) root.launch(cell.key)
                       else panel.openMenu(cell)
@@ -552,6 +571,7 @@ Item {
 
         // -------------------------------------------------------- context menu
         property var menuCell: null
+        function closeMenu() { menu.visible = false }
         function openMenu(cell) {
           var p = cell.mapToItem(panel.contentItem, 0, 0)
           menu.anchor.rect.x = p.x
@@ -568,72 +588,144 @@ Item {
           anchor.window: panel
           anchor.edges: Edges.Top
           anchor.gravity: Edges.Top
-          grabFocus: true
           color: "transparent"
           implicitWidth: card.width
-          implicitHeight: card.height
-          onVisibleChanged: if (!visible) panel.menuKey = ""
+          implicitHeight: card.height + 4
+          onVisibleChanged: {
+            if (visible) { card.shown = 0; popin.restart(); keys.forceActiveFocus() }
+            else panel.menuKey = ""
+          }
 
-          readonly property var wins: root.windowsByKey[panel.menuKey] || []
-          readonly property bool isPinned: root.pinned.indexOf(panel.menuKey) >= 0
-          readonly property bool hasEntry: !!root.entryFor(panel.menuKey)
+          // Dismissed the way Omarchy's own popups are: a Hyprland focus grab
+          // over the menu and the dock, cleared by a click anywhere else. Not
+          // PopupWindow.grabFocus — Qt then believes a popup is still open
+          // after the compositor dismisses it and eats the next click.
+          HyprlandFocusGrab {
+            active: menu.visible
+            windows: [menu, panel]
+            onCleared: menu.visible = false
+          }
+
+          readonly property string key: panel.menuKey
+          readonly property var wins: root.windowsByKey[key] || []
+          readonly property bool isPinned: root.pinned.indexOf(key) >= 0
+          readonly property bool hasEntry: !!root.entryFor(key)
 
           function run(fn) { menu.visible = false; fn() }
 
-          Rectangle {
+          Item {
+            id: keys
+            focus: true
+            Keys.onEscapePressed: menu.visible = false
+          }
+
+          // Pops up out of the icon: grows from 94% at its bottom edge and
+          // fades in, on the Super menu's curves.
+          ParallelAnimation {
+            id: popin
+            NumberAnimation {
+              target: card; property: "shown"; from: 0; to: 1; duration: 270
+              easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1]
+            }
+            NumberAnimation {
+              target: card; property: "opacity"; from: 0; to: 1; duration: 115
+              easing.type: Easing.BezierSpline; easing.bezierCurve: [0.5, 0.5, 0.75, 1, 1, 1]
+            }
+          }
+
+          BorderSurface {
             id: card
-            width: Math.max(200, Math.min(340, col.implicitWidth + 12))
-            height: col.implicitHeight + 12
-            radius: Math.min(10, Style.cornerRadius)
+            property real shown: 1
+            scale: 0.94 + 0.06 * shown
+            transformOrigin: Item.Bottom
+            transform: Translate { y: 6 * (1 - card.shown) }
+            width: Math.round(Math.max(232, Math.min(340, col.implicitWidth + 2 * padding)))
+            height: Math.round(col.implicitHeight + 2 * padding)
+            padding: Math.round(Style.space(6))
+            radius: Math.min(12, Style.cornerRadius)
             color: Color.menu.background
-            border.width: 1
-            border.color: Util.alpha(Color.menu.border, 0.25)
+            borderSpec: Border.surfaceSpec("menu", "border", Color.menu.border, 1)
 
             Column {
               id: col
-              x: 6
-              y: 6
-              width: card.width - 12
+              x: card.padding
+              y: card.padding
+              width: card.width - 2 * card.padding
+              spacing: 2
 
-              Text {
-                text: panel.menuKey ? root.nameFor(panel.menuKey) : ""
-                color: Util.alpha(Color.menu.text, 0.55)
-                font.pixelSize: Style.font.bodySmall
-                font.bold: true
-                leftPadding: 8
-                topPadding: 4
-                bottomPadding: 6
+              // Header: the app's icon and name, and whether it is running.
+              Item {
+                width: parent.width
+                implicitWidth: head.implicitWidth + 16
+                height: 44
+                Row {
+                  id: head
+                  x: 6
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: 10
+                  Image {
+                    width: 30; height: 30
+                    anchors.verticalCenter: parent.verticalCenter
+                    source: menu.key ? root.iconFor(menu.key) : ""
+                    sourceSize.width: Math.round(30 * panel.dpr)
+                    sourceSize.height: Math.round(30 * panel.dpr)
+                    asynchronous: true
+                    smooth: true
+                  }
+                  Column {
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 1
+                    Text {
+                      text: menu.key ? root.nameFor(menu.key) : ""
+                      color: Color.menu.text
+                      font.family: Style.font.menuFamily
+                      font.pixelSize: Style.font.subtitle
+                      font.weight: Font.DemiBold
+                    }
+                    Text {
+                      text: menu.wins.length === 0 ? "Not running"
+                          : menu.wins.length === 1 ? "1 window" : menu.wins.length + " windows"
+                      color: Util.alpha(Color.menu.text, 0.5)
+                      font.family: Style.font.menuFamily
+                      font.pixelSize: Style.font.bodySmall
+                    }
+                  }
+                }
               }
+
+              MenuSeparator { visible: menu.wins.length > 0 }
 
               Repeater {
                 model: menu.wins
                 MenuRow {
                   required property var modelData
                   label: modelData.title || modelData.class
-                  marked: modelData.address === root.activeAddress
+                  current: modelData.address === root.activeAddress
+                  badge: modelData.workspace && modelData.workspace.id > 0 ? String(modelData.workspace.name) : ""
                   onTriggered: menu.run(function() { root.focusWindow(modelData.address) })
                 }
               }
-              Rectangle {
-                visible: menu.wins.length > 0
-                width: parent.width; height: 9; color: "transparent"
-                Rectangle { anchors.centerIn: parent; width: parent.width - 12; height: 1; color: Util.alpha(Color.menu.text, 0.12) }
-              }
+
+              MenuSeparator {}
+
               MenuRow {
                 visible: menu.hasEntry || menu.wins.length === 0
+                glyph: menu.wins.length ? "\u{F0415}" : "\u{F14DE}"
                 label: menu.wins.length ? "New Window" : "Open"
-                onTriggered: { var k = panel.menuKey; menu.run(function() { root.launch(k) }) }
+                onTriggered: { var k = menu.key; menu.run(function() { root.launch(k) }) }
               }
               MenuRow {
                 visible: menu.hasEntry
-                label: menu.isPinned ? "Unpin from Dock" : "Pin to Dock"
-                onTriggered: { var k = panel.menuKey; menu.run(function() { root.togglePin(k) }) }
+                glyph: menu.isPinned ? "\u{F0931}" : "\u{F0403}"
+                label: menu.isPinned ? "Unpin from Dock" : "Keep in Dock"
+                onTriggered: { var k = menu.key; menu.run(function() { root.togglePin(k) }) }
               }
               MenuRow {
                 visible: menu.wins.length > 0
-                label: menu.wins.length > 1 ? "Close " + menu.wins.length + " Windows" : "Close"
+                glyph: "\u{F0156}"
+                label: menu.wins.length > 1 ? "Close All " + menu.wins.length + " Windows" : "Close Window"
                 danger: true
-                onTriggered: { var k = panel.menuKey; menu.run(function() { root.quit(k) }) }
+                onTriggered: { var k = menu.key; menu.run(function() { root.quit(k) }) }
               }
             }
           }
@@ -642,33 +734,86 @@ Item {
     }
   }
 
+  component MenuSeparator: Item {
+    width: parent ? parent.width : 0
+    height: visible ? 9 : 0
+    Rectangle {
+      anchors.centerIn: parent
+      width: parent.width - 12
+      height: 1
+      color: Util.alpha(Color.menu.text, 0.1)
+    }
+  }
+
+  // A menu row: a glyph (or, for a window, a dot that lights for the focused
+  // one), the label, and an optional workspace badge on the right.
   component MenuRow: Rectangle {
     id: mrow
     property string label: ""
-    property bool marked: false
+    property string glyph: ""
+    property string badge: ""
+    property bool current: false
     property bool danger: false
     signal triggered()
+    readonly property bool hot: marea.containsMouse
+    readonly property color ink: danger ? Color.urgent : (hot ? Color.menu.selectedText : Color.menu.text)
     width: parent ? parent.width : 200
-    implicitWidth: mlabel.implicitWidth + 40
-    height: visible ? 28 : 0
-    radius: Math.min(6, Style.cornerRadius)
-    color: marea.containsMouse ? Color.menu.selectedBackground : "transparent"
-    Rectangle {
-      visible: mrow.marked
-      width: 4; height: 4; radius: 2
-      anchors.verticalCenter: parent.verticalCenter
-      x: 8
-      color: Color.accent
+    implicitWidth: 36 + mlabel.implicitWidth + (badge ? mbadge.width + 16 : 12)
+    height: visible ? 32 : 0
+    radius: Math.min(8, Style.cornerRadius)
+    color: hot ? (danger ? Util.alpha(Color.urgent, 0.14) : Color.menu.selectedBackground) : "transparent"
+    Behavior on color { ColorAnimation { duration: 90 } }
+
+    Item {
+      id: lead
+      x: 6
+      width: 22
+      height: parent.height
+      Text {
+        anchors.centerIn: parent
+        visible: mrow.glyph !== ""
+        text: mrow.glyph
+        color: mrow.ink
+        font.family: Style.fontFamily
+        font.pixelSize: Style.font.heading
+      }
+      Rectangle {
+        anchors.centerIn: parent
+        visible: mrow.glyph === ""
+        width: 6; height: 6; radius: 3
+        color: mrow.current ? Color.accent : Util.alpha(Color.menu.text, 0.25)
+      }
     }
     Text {
       id: mlabel
       anchors.verticalCenter: parent.verticalCenter
-      x: 20
-      width: parent.width - 28
+      x: 36
+      width: parent.width - x - (mrow.badge ? mbadge.width + 16 : 10)
       elide: Text.ElideRight
       text: mrow.label
-      color: mrow.danger ? Color.urgent : (marea.containsMouse ? Color.menu.selectedText : Color.menu.text)
-      font.pixelSize: Style.font.subtitle
+      color: mrow.ink
+      font.family: Style.font.menuFamily
+      font.pixelSize: Style.font.body
+      font.weight: mrow.current ? Font.DemiBold : Font.Normal
+    }
+    Rectangle {
+      id: mbadge
+      visible: mrow.badge !== ""
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.right: parent.right
+      anchors.rightMargin: 8
+      width: Math.max(20, btext.implicitWidth + 10)
+      height: 18
+      radius: Math.min(5, Style.cornerRadius)
+      color: Util.alpha(Color.menu.text, mrow.hot ? 0.14 : 0.08)
+      Text {
+        id: btext
+        anchors.centerIn: parent
+        text: mrow.badge
+        color: Util.alpha(Color.menu.text, 0.7)
+        font.family: Style.font.menuFamily
+        font.pixelSize: Style.font.caption
+      }
     }
     MouseArea {
       id: marea
