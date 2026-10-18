@@ -8,8 +8,8 @@ import qs.Commons
 import qs.Ui
 
 // Bottom dock: pinned apps, then running apps that aren't pinned. Window state
-// comes from `hyprctl -j` (refreshed on Hyprland events), so window geometry is
-// known and the dock can hide only when a window actually overlaps it.
+// comes from Quickshell's Hyprland IPC (refreshed on Hyprland events), so window
+// geometry is known and the dock can hide only when a window actually overlaps it.
 //
 // Config: ~/.config/omarchy/dock.json (watched; the dock rewrites `pinned`
 // when you pin/unpin from the right-click menu).
@@ -583,10 +583,6 @@ Item {
                     color: Util.alpha(Color.bar.text, 0.2)
                   }
 
-                  // Rasterised once at the largest magnified size in device pixels,
-                  // then scaled down. IconImage ties sourceSize to its logical
-                  // size, so at 1.33 it rendered 44px icons blurry and reloaded
-                  // (blinked) on every magnification frame.
                   // Two rasters, both loaded once: one at exactly the resting
                   // device-pixel size (1:1, crisp) and one at the magnified size,
                   // shown only while the icon is enlarged. IconImage instead tied
