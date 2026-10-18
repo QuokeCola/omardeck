@@ -15,6 +15,7 @@ import qs.Ui
 // when you pin/unpin from the right-click menu).
 //   pinned    desktop ids, without ".desktop"
 //   iconSize  px at rest
+//   height    panel height in px (independent of iconSize)
 //   magnify   hovered icon scale (1 = off)
 //   autohide  "smart" (hide when a window overlaps), "always", "never"
 Item {
@@ -29,15 +30,19 @@ Item {
   readonly property string configPath: Quickshell.env("HOME") + "/.config/omarchy/dock.json"
   property var config: ({})
   readonly property var pinned: Array.isArray(config.pinned) ? config.pinned : []
-  readonly property int iconSize: Math.max(24, Number(config.iconSize) || 44)
+  readonly property int iconSize: Math.max(24, Number(config.iconSize) || 38)
   readonly property real magnify: Math.max(1, Math.min(2, Number(config.magnify) || 1.45))
   readonly property string autohide: ["smart", "always", "never"].indexOf(config.autohide) >= 0 ? config.autohide : "smart"
 
-  readonly property int spacing: Math.round(iconSize * 0.18)
-  readonly property int padding: Math.round(iconSize * 0.2)
-  readonly property int dotRow: 7
-  readonly property int dockHeight: iconSize + padding + Math.max(padding, dotRow + 3)
-  readonly property int edgeGap: Math.max(4, Style.gapsOut * 2)
+  // The panel's height is set on its own, so smaller icons get more air
+  // rather than a thinner dock. Icons sit centred above a strip for the dots.
+  readonly property int dotZone: 10
+  readonly property int dockHeight: Math.max(iconSize + dotZone + 4, Number(config.height) || 63)
+  readonly property int padding: Math.round((dockHeight - dotZone - iconSize) / 2) + 1
+  readonly property int sidePadding: Math.max(padding, Math.round(iconSize * 0.3))
+  readonly property int spacing: Math.round(iconSize * 0.26)
+  // Flush with the screen edge.
+  readonly property int edgeGap: 0
   readonly property int separatorWidth: spacing + 1
   // Edge strip that reveals a hidden dock. Kept a few px tall: thinner input
   // regions get lost to rounding at fractional scale.
@@ -222,7 +227,7 @@ Item {
   // magnification without feedback from the growing icons.
   readonly property var baseCenters: {
     var out = []
-    var x = root.padding
+    var x = root.sidePadding
     for (var i = 0; i < root.items.length; i++) {
       var w = root.items[i].separator ? root.separatorWidth : root.iconSize
       out.push(x + w / 2)
@@ -231,7 +236,7 @@ Item {
     return out
   }
   readonly property real baseWidth: {
-    var w = root.padding * 2
+    var w = root.sidePadding * 2
     for (var i = 0; i < root.items.length; i++)
       w += (root.items[i].separator ? root.separatorWidth : root.iconSize) + (i ? root.spacing : 0)
     return w
@@ -404,7 +409,7 @@ Item {
               x: panel.snap((parent.width - width) / 2)
               y: panel.snap(parent.height - root.edgeGap - height)
               height: panel.snap(root.dockHeight)
-              width: row.width + panel.snap(root.padding) * 2
+              width: row.width + panel.snap(root.sidePadding) * 2
               radius: Math.min(14, Style.cornerRadius)
               color: Color.bar.background
               border.width: 1
@@ -413,7 +418,7 @@ Item {
 
             Row {
               id: row
-              x: dock.x + panel.snap(root.padding)
+              x: dock.x + panel.snap(root.sidePadding)
               y: dock.y + panel.snap(root.padding) + panel.restIcon - height
               spacing: panel.snap(root.spacing)
 
@@ -592,19 +597,24 @@ Item {
           implicitWidth: card.width
           implicitHeight: card.height + 4
           onVisibleChanged: {
-            if (visible) { card.shown = 0; popin.restart(); keys.forceActiveFocus() }
-            else panel.menuKey = ""
+            if (visible) { card.shown = 0; popin.restart(); keys.forceActiveFocus(); armGrab.restart() }
+            else { grab.active = false; panel.menuKey = "" }
           }
 
           // Dismissed the way Omarchy's own popups are: a Hyprland focus grab
           // over the menu and the dock, cleared by a click anywhere else. Not
           // PopupWindow.grabFocus — Qt then believes a popup is still open
           // after the compositor dismisses it and eats the next click.
+          // Armed a beat after the popup maps: armed with it, the grab was
+          // built before the popup's surface existed, so it covered only the
+          // dock and every click on the menu counted as outside.
           HyprlandFocusGrab {
-            active: menu.visible
+            id: grab
+            active: false
             windows: [menu, panel]
             onCleared: menu.visible = false
           }
+          Timer { id: armGrab; interval: 60; onTriggered: grab.active = menu.visible }
 
           readonly property string key: panel.menuKey
           readonly property var wins: root.windowsByKey[key] || []

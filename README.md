@@ -22,13 +22,15 @@ Enable by adding `{ "id": "quokecola.dock" }` to `plugins` in
 ```json
 {
   "pinned": ["org.gnome.Nautilus", "google-chrome", "foot"],
-  "iconSize": 44,
-  "magnify": 1.45,
+  "iconSize": 38,
+  "height": 63,
+  "magnify": 1,
   "autohide": "smart"
 }
 ```
 
-`autohide`: `smart`, `always` or `never`. `magnify`: hovered-icon scale, `1` turns it off.
+`autohide`: `smart`, `always` or `never`. `magnify`: hovered-icon scale, `1` turns it off. `height` sets the panel height
+independently of `iconSize`.
 
 The dock announces how much of each screen's bottom edge it covers on
 Hyprland's event socket as `custom>>dock-state,<monitor>,<px>` (0 when hidden);
