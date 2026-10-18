@@ -166,14 +166,15 @@ Item {
     }
   }
 
-  // Dragging a floating window emits no event, so poll slowly while one is on
-  // a visible workspace (a socket request, no process).
-  property bool floatingVisible: false
+  // Dragging a floating window emits no event, so poll slowly while one could
+  // change whether a dock hides: a floating window on a screen's visible
+  // workspace that no tiled or fullscreen window already covers the dock on
+  // (tiles only move with events). Windows only: monitors don't change.
   Timer {
     interval: 1200
     repeat: true
-    running: root.floatingVisible && root.autohide === "smart"
-    onTriggered: root.refresh()
+    running: root.autohide === "smart" && panels.instances.some(function(p) { return p.needsPoll })
+    onTriggered: Hyprland.refreshToplevels()
   }
 
   // ------------------------------------------------------------- app model
@@ -273,25 +274,16 @@ Item {
   function rebuild() {
     root.snapshot()
     var byKey = {}
-    var floating = false
-    var visibleWs = {}
-    for (var m = 0; m < root.monitors.length; m++) {
-      var mon = root.monitors[m]
-      if (mon.activeWorkspace) visibleWs[mon.activeWorkspace.id] = true
-      if (mon.specialWorkspace && mon.specialWorkspace.id) visibleWs[mon.specialWorkspace.id] = true
-    }
     for (var i = 0; i < root.clients.length; i++) {
       var c = root.clients[i]
       if (!c.mapped || !c.class) continue
       var key = root.keyForClass(c.class)
       if (!byKey[key]) byKey[key] = []
       byKey[key].push(c)
-      if (c.floating && visibleWs[c.workspace.id]) floating = true
     }
     for (var k in byKey) byKey[k].sort(function(a, b) {
       return root.mruRank(a.address, a.focusHistoryID) - root.mruRank(b.address, b.focusHistoryID)
     })
-    root.floatingVisible = floating
     var sigW = JSON.stringify(Object.keys(byKey).sort().map(function(k) {
       return [k, byKey[k].map(function(w) { return w.address + "@" + w.workspace.id })]
     })) + "|" + root.clientsSig.length + root.clientsSig.slice(-64)
@@ -402,6 +394,7 @@ Item {
 
   // ----------------------------------------------------------------- surface
   Variants {
+    id: panels
     model: Quickshell.screens
 
     delegate: Component {
@@ -417,9 +410,12 @@ Item {
         }
 
         // Does any window on this monitor's visible workspace cover the dock?
-        readonly property bool overlapped: {
+        // Tiled/fullscreen and floating windows counted apart: only floating
+        // ones move without an event (see the poll timer).
+        readonly property var coverage: {
+          var out = { fixed: false, floating: false, floatingHere: false }
           var mon = panel.monitor
-          if (!mon) return false
+          if (!mon) return out
           var ws = mon.activeWorkspace ? mon.activeWorkspace.id : -999
           var sp = mon.specialWorkspace && mon.specialWorkspace.id ? mon.specialWorkspace.id : -999
           var left = modelData.x + (modelData.width - root.baseWidth) / 2
@@ -428,13 +424,20 @@ Item {
           var top = bottom - root.edgeGap - root.dockHeight
           for (var i = 0; i < root.clients.length; i++) {
             var c = root.clients[i]
-            if (!c.mapped || c.hidden || c.monitor !== mon.id) continue
+            if (!c.mapped || c.monitor !== mon.id) continue
             if (c.workspace.id !== ws && c.workspace.id !== sp) continue
-            if (c.fullscreen) return true
-            if (c.at[0] < right && c.at[0] + c.size[0] > left && c.at[1] < bottom && c.at[1] + c.size[1] > top) return true
+            var fixed = !c.floating || !!c.fullscreen
+            if (!fixed) out.floatingHere = true
+            if (c.hidden) continue
+            if (c.fullscreen || (c.at[0] < right && c.at[0] + c.size[0] > left && c.at[1] < bottom && c.at[1] + c.size[1] > top)) {
+              if (fixed) out.fixed = true
+              else out.floating = true
+            }
           }
-          return false
+          return out
         }
+        readonly property bool overlapped: coverage.fixed || coverage.floating
+        readonly property bool needsPoll: coverage.floatingHere && !coverage.fixed
 
         property bool hovered: false
         property bool lingering: false
