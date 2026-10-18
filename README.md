@@ -8,7 +8,8 @@ running apps.
 - Smart auto-hide: hides only while a window on that monitor's visible workspace
   covers the dock (or one is fullscreen); touch the bottom edge to reveal
 - Name tooltips, launch bounce, optional hover magnification
-- Left click: launch / focus; with several windows, opens Aerial's overview on
+- Left click: launch / focus (a window on another desktop: Aerial slides there,
+  `slideToWindow: false` switches at once); with several windows, opens Aerial's overview on
   just that app's windows to pick one (`windowPicker: "cycle"` cycles instead). Middle click: new window.
   Right click: menu with the app's windows (and their workspaces), New Window,
   Keep in Dock / Unpin, Close

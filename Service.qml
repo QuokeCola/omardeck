@@ -18,6 +18,8 @@ import qs.Ui
 //   height    panel height in px (independent of iconSize)
 //   magnify   hovered icon scale (1 = off)
 //   autohide  "smart" (hide when a window overlaps), "always", "never"
+//   slideToWindow  clicking an app whose one window is on another desktop:
+//             true (default) has Aerial slide there; false switches at once
 //   windowPicker  clicking an app with several windows: "aerial" opens
 //             Aerial's overview on just that app's windows; "cycle" focuses
 //             them in turn
@@ -35,6 +37,7 @@ Item {
   readonly property var pinned: Array.isArray(config.pinned) ? config.pinned : []
   readonly property int iconSize: Math.max(24, Number(config.iconSize) || 38)
   readonly property real magnify: Math.max(1, Math.min(2, Number(config.magnify) || 1.45))
+  readonly property bool slideToWindow: config.slideToWindow !== false
   readonly property string windowPicker: config.windowPicker === "cycle" ? "cycle" : "aerial"
   readonly property string autohide: ["smart", "always", "never"].indexOf(config.autohide) >= 0 ? config.autohide : "smart"
 
@@ -155,6 +158,10 @@ Item {
     function onRawEvent(event) {
       var n = event.name
       if (n === "openlayer" && String(event.data).trim() === "omarchy-aerial") root.restack()
+      else if (n === "custom" && String(event.data).indexOf("aerial-state,") === 0) {
+        // Aerial took the jump (or finished one): no fallback needed.
+        if (root.jumpPending) { root.jumpPending = ""; jumpFallback.stop() }
+      }
       else if (root.refreshEvents.indexOf(n) >= 0) root.refresh()
     }
   }
@@ -359,13 +366,31 @@ Item {
     }
     var idx = -1
     for (var i = 0; i < wins.length; i++) if (wins[i].address === root.activeAddress) idx = i
-    if (idx < 0) { root.focusWindow(wins[0].address); return }
+    if (idx < 0) { root.goToWindow(wins[0]); return }
     if (wins.length < 2) return
     // Cycle in a stable order (by address) so repeated clicks visit every window.
     var stable = wins.slice().sort(function(a, b) { return a.address < b.address ? -1 : 1 })
     var at = 0
     for (var j = 0; j < stable.length; j++) if (stable[j].address === root.activeAddress) at = j
     root.focusWindow(stable[(at + 1) % stable.length].address)
+  }
+
+  // Off on another desktop: ask Aerial to slide there. If it doesn't start
+  // sliding promptly (not installed, or busy), just switch.
+  property string jumpPending: ""
+  function goToWindow(win) {
+    var mon = null
+    for (var m = 0; m < root.monitors.length; m++) if (root.monitors[m].id === win.monitor) mon = root.monitors[m]
+    var here = mon && mon.activeWorkspace && mon.activeWorkspace.id === win.workspace.id
+    if (!root.slideToWindow || here || win.workspace.id <= 0) { root.focusWindow(win.address); return }
+    root.jumpPending = win.address
+    jumpFallback.restart()
+    Hyprland.dispatch('hl.dsp.event("aerial,goto:' + String(win.address).replace(/^0x/, "") + '")')
+  }
+  Timer {
+    id: jumpFallback
+    interval: 400
+    onTriggered: if (root.jumpPending) { root.focusWindow(root.jumpPending); root.jumpPending = "" }
   }
 
   function quit(key) {
