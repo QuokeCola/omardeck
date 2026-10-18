@@ -312,6 +312,11 @@ Item {
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
         anchors.bottom: true
+        readonly property real dpr: modelData.devicePixelRatio || 1
+        // Snap logical lengths onto the device-pixel grid (0.75 px steps at
+        // 1.33) so resting icons land on whole pixels instead of smearing.
+        function snap(v) { return Math.round(v * dpr) / dpr }
+        readonly property real restIcon: snap(root.iconSize)
         readonly property real headroom: root.iconSize * (root.magnify - 1) + 40
         implicitWidth: Math.ceil(root.baseWidth + root.iconSize * (root.magnify - 1) * 3 + 160)
         implicitHeight: Math.ceil(root.edgeGap + root.dockHeight + headroom)
@@ -345,24 +350,28 @@ Item {
           Item {
             id: slider
             anchors.fill: parent
-            property real offset: panel.revealed ? 0 : root.edgeGap + root.dockHeight + 6
+            // Heavy slide: rises, carries a little past its rest line and
+            // settles back; sinks by easing out of rest, then accelerating away.
+            readonly property real hiddenOffset: root.edgeGap + root.dockHeight + 6
+            property real offset: panel.revealed ? 0 : hiddenOffset
             Behavior on offset {
               NumberAnimation {
-                duration: panel.revealed ? 280 : 200
-                easing.type: panel.revealed ? Easing.OutQuint : Easing.InCubic
+                duration: panel.revealed ? 620 : 420
+                easing.type: panel.revealed ? Easing.OutBack : Easing.BezierSpline
+                easing.overshoot: 0.8
+                easing.bezierCurve: [0.55, 0, 0.75, 0.2, 1, 1]
               }
             }
             transform: Translate { y: slider.offset }
-            opacity: panel.revealed ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: panel.revealed ? 160 : 220 } }
+            // Fully parked: drop the content so nothing (or its blur) lingers.
+            visible: offset < hiddenOffset - 0.5
 
             Rectangle {
               id: dock
-              anchors.horizontalCenter: parent.horizontalCenter
-              anchors.bottom: parent.bottom
-              anchors.bottomMargin: root.edgeGap
-              height: root.dockHeight
-              width: row.width + root.padding * 2
+              x: panel.snap((parent.width - width) / 2)
+              y: panel.snap(parent.height - root.edgeGap - height)
+              height: panel.snap(root.dockHeight)
+              width: row.width + panel.snap(root.padding) * 2
               radius: Math.min(14, Style.cornerRadius)
               color: Color.bar.background
               border.width: 1
@@ -371,10 +380,9 @@ Item {
 
             Row {
               id: row
-              anchors.horizontalCenter: dock.horizontalCenter
-              anchors.bottom: dock.bottom
-              anchors.bottomMargin: dock.height - root.padding - root.iconSize
-              spacing: root.spacing
+              x: dock.x + panel.snap(root.padding)
+              y: dock.y + panel.snap(root.padding) + panel.restIcon - height
+              spacing: panel.snap(root.spacing)
 
               Repeater {
                 model: root.items
@@ -399,8 +407,8 @@ Item {
                   property real zoom: target
                   Behavior on zoom { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
 
-                  width: isSep ? root.separatorWidth : root.iconSize * zoom
-                  height: isSep ? root.iconSize : root.iconSize * zoom
+                  width: isSep ? panel.snap(root.separatorWidth) : panel.snap(root.iconSize * zoom)
+                  height: isSep ? panel.restIcon : panel.snap(root.iconSize * zoom)
                   anchors.bottom: parent.bottom
 
                   Rectangle {
@@ -411,16 +419,49 @@ Item {
                     color: Util.alpha(Color.bar.text, 0.2)
                   }
 
-                  IconImage {
+                  // Rasterised once at the largest magnified size in device pixels,
+                  // then scaled down. IconImage ties sourceSize to its logical
+                  // size, so at 1.33 it rendered 44px icons blurry and reloaded
+                  // (blinked) on every magnification frame.
+                  // Two rasters, both loaded once: one at exactly the resting
+                  // device-pixel size (1:1, crisp) and one at the magnified size,
+                  // shown only while the icon is enlarged. IconImage instead tied
+                  // sourceSize to its logical size, so it was soft at 1.33 and
+                  // reloaded (blinked) on every magnification frame.
+                  Item {
                     id: icon
                     visible: !cell.isSep
                     width: parent.width
                     height: parent.height
                     y: -cell.hop
-                    source: cell.isSep ? "" : root.iconFor(cell.key)
-                    asynchronous: true
-                    mipmap: true
                     opacity: mouse.pressed ? 0.7 : 1
+                    readonly property string src: cell.isSep ? "" : root.iconFor(cell.key)
+                    readonly property bool big: cell.zoom > 1.01
+
+                    Image {
+                      anchors.fill: parent
+                      visible: !icon.big || bigImg.status !== Image.Ready
+                      source: icon.src
+                      sourceSize.width: Math.round(panel.restIcon * panel.dpr)
+                      sourceSize.height: Math.round(panel.restIcon * panel.dpr)
+                      fillMode: Image.PreserveAspectFit
+                      // Must stay async: a synchronous image://icon load
+                      // crashes the whole shell inside QIcon::pixmap.
+                      asynchronous: true
+                      smooth: true
+                    }
+                    Image {
+                      id: bigImg
+                      anchors.fill: parent
+                      visible: icon.big && status === Image.Ready
+                      source: root.magnify > 1 ? icon.src : ""
+                      sourceSize.width: Math.ceil(root.iconSize * root.magnify * panel.dpr)
+                      sourceSize.height: Math.ceil(root.iconSize * root.magnify * panel.dpr)
+                      fillMode: Image.PreserveAspectFit
+                      asynchronous: true
+                      smooth: true
+                      mipmap: true
+                    }
                   }
 
                   // Launch feedback: hop until a window shows up (or ~2.5s).
