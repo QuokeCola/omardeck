@@ -99,12 +99,22 @@ Item {
   }
   Component.onCompleted: refresh()
 
+  // The dock shares the Overlay layer with Aerial's full-screen surface so a
+  // desktop swipe doesn't paint over it. On one layer the last surface mapped
+  // stacks on top, so remap the dock whenever Aerial maps (startup, leaving a
+  // fullscreen window) and once shortly after start.
+  property bool remapping: false
+  function restack() { root.remapping = true; remapTimer.restart() }
+  Timer { id: remapTimer; interval: 50; onTriggered: root.remapping = false }
+  Timer { interval: 2000; running: true; onTriggered: root.restack() }
+
   Connections {
     target: Hyprland
     function onRawEvent(event) {
       var n = event.name
       if (n === "openlayer" || n === "closelayer" || n === "activelayout" || n === "windowtitle") {
         if (n === "windowtitle") root.refresh()
+        if (n === "openlayer" && String(event.data).trim() === "omarchy-aerial") root.restack()
         return
       }
       root.refresh()
@@ -304,11 +314,16 @@ Item {
         onHoveredChanged: if (!hovered) { lingering = true; lingerTimer.restart() }
         Timer { id: lingerTimer; interval: 350; onTriggered: panel.lingering = false }
 
-        visible: root.items.length > 0
+        // Over a fullscreen window, unmap once slid away: any surface above
+        // it, even an empty one, stops the compositor scanning it out directly.
+        readonly property var hyprMonitor: (Hyprland.monitors.values || []).find(m => m.name === modelData.name) || null
+        readonly property bool fullscreenHere: !!(hyprMonitor && hyprMonitor.activeWorkspace
+                                                  && hyprMonitor.activeWorkspace.hasFullscreen)
+        visible: root.items.length > 0 && !root.remapping && !(fullscreenHere && !revealed && !slider.visible)
         color: "transparent"
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.namespace: "omarchy-dock"
-        WlrLayershell.layer: WlrLayer.Top
+        WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
         anchors.bottom: true
