@@ -230,6 +230,58 @@ Item {
   property var items: []       // [{ key, separator }]
   property string itemsSig: ""
 
+  // What the dock draws: `items` plus icons still shrinking away. Kept as a
+  // keyed ListModel so surviving icons keep their delegates and only the
+  // changed ones grow in or shrink out (pin, unpin, apps opening/closing).
+  ListModel { id: cells }
+  property int cellUid: 0
+  property bool cellsReady: false
+
+  function syncCells(next) {
+    var live = []
+    for (var i = 0; i < cells.count; i++) {
+      var c = cells.get(i)
+      if (!c.leaving) live.push({ row: i, t: next.findIndex(function(it) { return it.key === c.key }) })
+    }
+    // Keep the longest run of icons already in the right order; everything
+    // else leaves and re-enters at its new place (a pin moves the icon from
+    // the running group to the end of the pinned ones).
+    var len = [], prev = []
+    for (var a = 0; a < live.length; a++) {
+      len[a] = live[a].t < 0 ? 0 : 1; prev[a] = -1
+      if (live[a].t < 0) continue
+      for (var b = 0; b < a; b++)
+        if (live[b].t >= 0 && live[b].t < live[a].t && len[b] + 1 > len[a]) { len[a] = len[b] + 1; prev[a] = b }
+    }
+    var best = -1
+    for (var m = 0; m < live.length; m++) if (best < 0 || len[m] > len[best]) best = m
+    var kept = {}
+    for (var k = best; k >= 0 && len[k] > 0; k = prev[k]) kept[live[k].row] = true
+    var rowOf = {}
+    for (var r = 0; r < cells.count; r++) {
+      var cr = cells.get(r)
+      if (cr.leaving) continue
+      if (kept[r]) rowOf[next.findIndex(function(it) { return it.key === cr.key })] = r
+      else cells.setProperty(r, "leaving", true)
+    }
+    // Insert the rest right after their predecessor in the new order.
+    for (var t = 0; t < next.length; t++) {
+      if (rowOf[t] !== undefined) continue
+      var at = t > 0 ? rowOf[t - 1] + 1 : 0
+      cells.insert(at, { key: next[t].key, separator: next[t].separator, leaving: false, uid: ++root.cellUid })
+      for (var q in rowOf) if (rowOf[q] >= at) rowOf[q]++
+      rowOf[t] = at
+    }
+    root.cellsReady = true
+  }
+
+  function dropCell(uid) {
+    for (var i = 0; i < cells.count; i++)
+      if (cells.get(i).uid === uid) { cells.remove(i); return }
+  }
+
+  function itemIndex(key) { return root.items.findIndex(function(it) { return it.key === key }) }
+
   property string clientsSig: ""
   property string monitorsSig: ""
   property string windowsSig: ""
@@ -318,6 +370,7 @@ Item {
     if (sig !== root.itemsSig) {
       root.itemsSig = sig
       root.items = next
+      root.syncCells(next)
     }
   }
 
@@ -543,7 +596,7 @@ Item {
               x: panel.snap((parent.width - width) / 2)
               y: panel.snap(parent.height - root.edgeGap - height)
               height: panel.snap(root.dockHeight)
-              width: row.width + panel.snap(root.sidePadding) * 2
+              width: Math.max(0, row.width - panel.snap(root.spacing)) + panel.snap(root.sidePadding) * 2
               radius: Math.min(14, Style.cornerRadius)
               color: Color.bar.background
               border.width: 1
@@ -554,148 +607,171 @@ Item {
               id: row
               x: dock.x + panel.snap(root.sidePadding)
               y: dock.y + panel.snap(root.padding) + panel.restIcon - height
-              spacing: panel.snap(root.spacing)
+              // Each slot carries its own trailing gap so a growing or
+              // shrinking icon opens and closes the space smoothly.
+              spacing: 0
 
               Repeater {
-                model: root.items
+                model: cells
 
                 delegate: Item {
-                  id: cell
-                  required property var modelData
-                  required property int index
-                  readonly property string key: modelData.key
-                  readonly property bool isSep: modelData.separator
-                  readonly property var wins: root.windowsByKey[key] || []
-                  readonly property bool isActive: {
-                    for (var i = 0; i < wins.length; i++) if (wins[i].address === root.activeAddress) return true
-                    return false
-                  }
+                  id: slot
+                  required property string key
+                  required property bool separator
+                  required property bool leaving
+                  required property int uid
 
-                  readonly property real target: {
-                    if (isSep || !panel.hovered || root.magnify <= 1 || panel.menuKey !== "") return 1
-                    var d = (panel.pointerX - (root.baseCenters[index] || 0)) / (root.iconSize + root.spacing)
-                    return 1 + (root.magnify - 1) * Math.exp(-d * d / 1.6)
-                  }
-                  property real zoom: target
-                  Behavior on zoom { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
+                  // 0 -> 1 as the icon arrives, back to 0 as it leaves.
+                  property real grow: root.cellsReady ? 0 : 1
+                  Component.onCompleted: grow = Qt.binding(function() { return slot.leaving ? 0 : 1 })
+                  Behavior on grow { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
+                  onGrowChanged: if (leaving && grow <= 0) Qt.callLater(root.dropCell, uid)
 
-                  width: isSep ? panel.snap(root.separatorWidth) : panel.snap(root.iconSize * zoom)
-                  height: isSep ? panel.restIcon : panel.snap(root.iconSize * zoom)
+                  width: (cell.width + panel.snap(root.spacing)) * grow
+                  height: cell.height
                   anchors.bottom: parent.bottom
 
-                  Rectangle {
-                    visible: cell.isSep
-                    anchors.centerIn: parent
-                    width: 1
-                    height: root.iconSize * 0.7
-                    color: Util.alpha(Color.bar.text, 0.2)
-                  }
-
-                  // Two rasters, both loaded once: one at exactly the resting
-                  // device-pixel size (1:1, crisp) and one at the magnified size,
-                  // shown only while the icon is enlarged. IconImage instead tied
-                  // sourceSize to its logical size, so it was soft at 1.33 and
-                  // reloaded (blinked) on every magnification frame.
                   Item {
-                    id: icon
-                    visible: !cell.isSep
-                    width: parent.width
-                    height: parent.height
-                    y: -cell.hop
-                    opacity: mouse.pressed ? 0.7 : 1
-                    readonly property string src: cell.isSep ? "" : root.iconFor(cell.key)
-                    readonly property bool big: cell.zoom > 1.01
-
-                    Image {
-                      anchors.fill: parent
-                      visible: !icon.big || bigImg.status !== Image.Ready
-                      source: icon.src
-                      sourceSize.width: Math.round(panel.restIcon * panel.dpr)
-                      sourceSize.height: Math.round(panel.restIcon * panel.dpr)
-                      fillMode: Image.PreserveAspectFit
-                      // Must stay async: a synchronous image://icon load
-                      // crashes the whole shell inside QIcon::pixmap.
-                      asynchronous: true
-                      smooth: true
+                    id: cell
+                    readonly property string key: slot.key
+                    readonly property bool isSep: slot.separator
+                    readonly property int index: root.itemIndex(key)
+                    scale: slot.grow
+                    opacity: slot.grow
+                    transformOrigin: Item.Bottom
+                    readonly property var wins: root.windowsByKey[key] || []
+                    readonly property bool isActive: {
+                      for (var i = 0; i < wins.length; i++) if (wins[i].address === root.activeAddress) return true
+                      return false
                     }
-                    Image {
-                      id: bigImg
-                      anchors.fill: parent
-                      visible: icon.big && status === Image.Ready
-                      source: root.magnify > 1 ? icon.src : ""
-                      sourceSize.width: Math.ceil(root.iconSize * root.magnify * panel.dpr)
-                      sourceSize.height: Math.ceil(root.iconSize * root.magnify * panel.dpr)
-                      fillMode: Image.PreserveAspectFit
-                      asynchronous: true
-                      smooth: true
-                      mipmap: true
+
+                    readonly property real target: {
+                      if (isSep || slot.leaving || !panel.hovered || root.magnify <= 1 || panel.menuKey !== "") return 1
+                      var d = (panel.pointerX - (root.baseCenters[index] || 0)) / (root.iconSize + root.spacing)
+                      return 1 + (root.magnify - 1) * Math.exp(-d * d / 1.6)
                     }
-                  }
+                    property real zoom: target
+                    Behavior on zoom { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
 
-                  // Launch feedback: hop until a window shows up (or ~2.5s).
-                  property real hop: 0
-                  SequentialAnimation {
-                    id: bounce
-                    loops: 3
-                    NumberAnimation { target: cell; property: "hop"; to: root.iconSize * 0.3; duration: 280; easing.type: Easing.OutQuad }
-                    NumberAnimation { target: cell; property: "hop"; to: 0; duration: 340; easing.type: Easing.OutBounce }
-                  }
-                  Connections {
-                    target: root
-                    function onLaunched(k) { if (k === cell.key && !cell.isSep) bounce.restart() }
-                  }
-                  onWinsChanged: if (wins.length && bounce.running) { bounce.stop(); hop = 0 }
+                    width: isSep ? panel.snap(root.separatorWidth) : panel.snap(root.iconSize * zoom)
+                    height: isSep ? panel.restIcon : panel.snap(root.iconSize * zoom)
+                    anchors.bottom: parent.bottom
+                    x: 0
 
-                  Row {
-                    visible: !cell.isSep
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.top: parent.bottom
-                    anchors.topMargin: Math.max(2, (root.dockHeight - root.padding - root.iconSize - 4) / 2 - 1)
-                    spacing: 3
-                    Repeater {
-                      model: Math.min(3, cell.wins.length)
-                      Rectangle {
-                        width: 4
-                        height: 4
-                        radius: 2
-                        color: cell.isActive ? Color.accent : Util.alpha(Color.bar.text, 0.6)
+                    Rectangle {
+                      visible: cell.isSep
+                      anchors.centerIn: parent
+                      width: 1
+                      height: root.iconSize * 0.7
+                      color: Util.alpha(Color.bar.text, 0.2)
+                    }
+
+                    // Two rasters, both loaded once: one at exactly the resting
+                    // device-pixel size (1:1, crisp) and one at the magnified size,
+                    // shown only while the icon is enlarged. IconImage instead tied
+                    // sourceSize to its logical size, so it was soft at 1.33 and
+                    // reloaded (blinked) on every magnification frame.
+                    Item {
+                      id: icon
+                      visible: !cell.isSep
+                      width: parent.width
+                      height: parent.height
+                      y: -cell.hop
+                      opacity: mouse.pressed ? 0.7 : 1
+                      readonly property string src: cell.isSep ? "" : root.iconFor(cell.key)
+                      readonly property bool big: cell.zoom > 1.01
+
+                      Image {
+                        anchors.fill: parent
+                        visible: !icon.big || bigImg.status !== Image.Ready
+                        source: icon.src
+                        sourceSize.width: Math.round(panel.restIcon * panel.dpr)
+                        sourceSize.height: Math.round(panel.restIcon * panel.dpr)
+                        fillMode: Image.PreserveAspectFit
+                        // Must stay async: a synchronous image://icon load
+                        // crashes the whole shell inside QIcon::pixmap.
+                        asynchronous: true
+                        smooth: true
+                      }
+                      Image {
+                        id: bigImg
+                        anchors.fill: parent
+                        visible: icon.big && status === Image.Ready
+                        source: root.magnify > 1 ? icon.src : ""
+                        sourceSize.width: Math.ceil(root.iconSize * root.magnify * panel.dpr)
+                        sourceSize.height: Math.ceil(root.iconSize * root.magnify * panel.dpr)
+                        fillMode: Image.PreserveAspectFit
+                        asynchronous: true
+                        smooth: true
+                        mipmap: true
                       }
                     }
-                  }
 
-                  Rectangle {
-                    id: tip
-                    visible: !cell.isSep && mouse.containsMouse && panel.menuKey === "" && !mouse.pressed
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.bottom: icon.top
-                    anchors.bottomMargin: 8
-                    width: tipText.implicitWidth + 16
-                    height: tipText.implicitHeight + 8
-                    radius: Math.min(6, Style.cornerRadius)
-                    color: Color.tooltip.background
-                    border.width: 1
-                    border.color: Util.alpha(Color.tooltip.border, 0.3)
-                    Text {
-                      id: tipText
-                      anchors.centerIn: parent
-                      text: cell.isSep ? "" : root.nameFor(cell.key)
-                      color: Color.tooltip.text
-                      font.pixelSize: Style.font.body
+                    // Launch feedback: hop until a window shows up (or ~2.5s).
+                    property real hop: 0
+                    SequentialAnimation {
+                      id: bounce
+                      loops: 3
+                      NumberAnimation { target: cell; property: "hop"; to: root.iconSize * 0.3; duration: 280; easing.type: Easing.OutQuad }
+                      NumberAnimation { target: cell; property: "hop"; to: 0; duration: 340; easing.type: Easing.OutBounce }
                     }
-                  }
+                    Connections {
+                      target: root
+                      function onLaunched(k) { if (k === cell.key && !cell.isSep) bounce.restart() }
+                    }
+                    onWinsChanged: if (wins.length && bounce.running) { bounce.stop(); hop = 0 }
 
-                  MouseArea {
-                    id: mouse
-                    enabled: !cell.isSep
-                    anchors.fill: parent
-                    anchors.margins: -root.spacing / 2
-                    hoverEnabled: true
-                    acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
-                    onClicked: function(ev) {
-                      if (ev.button !== Qt.RightButton) panel.closeMenu()
-                      if (ev.button === Qt.LeftButton) root.activate(cell.key)
-                      else if (ev.button === Qt.MiddleButton) root.launch(cell.key)
-                      else panel.openMenu(cell)
+                    Row {
+                      visible: !cell.isSep
+                      anchors.horizontalCenter: parent.horizontalCenter
+                      anchors.top: parent.bottom
+                      anchors.topMargin: Math.max(2, (root.dockHeight - root.padding - root.iconSize - 4) / 2 - 1)
+                      spacing: 3
+                      Repeater {
+                        model: Math.min(3, cell.wins.length)
+                        Rectangle {
+                          width: 4
+                          height: 4
+                          radius: 2
+                          color: cell.isActive ? Color.accent : Util.alpha(Color.bar.text, 0.6)
+                        }
+                      }
+                    }
+
+                    Rectangle {
+                      id: tip
+                      visible: !cell.isSep && mouse.containsMouse && panel.menuKey === "" && !mouse.pressed
+                      anchors.horizontalCenter: parent.horizontalCenter
+                      anchors.bottom: icon.top
+                      anchors.bottomMargin: 8
+                      width: tipText.implicitWidth + 16
+                      height: tipText.implicitHeight + 8
+                      radius: Math.min(6, Style.cornerRadius)
+                      color: Color.tooltip.background
+                      border.width: 1
+                      border.color: Util.alpha(Color.tooltip.border, 0.3)
+                      Text {
+                        id: tipText
+                        anchors.centerIn: parent
+                        text: cell.isSep ? "" : root.nameFor(cell.key)
+                        color: Color.tooltip.text
+                        font.pixelSize: Style.font.body
+                      }
+                    }
+
+                    MouseArea {
+                      id: mouse
+                      enabled: !cell.isSep && !slot.leaving
+                      anchors.fill: parent
+                      anchors.margins: -root.spacing / 2
+                      hoverEnabled: true
+                      acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+                      onClicked: function(ev) {
+                        if (ev.button !== Qt.RightButton) panel.closeMenu()
+                        if (ev.button === Qt.LeftButton) root.activate(cell.key)
+                        else if (ev.button === Qt.MiddleButton) root.launch(cell.key)
+                        else panel.openMenu(cell)
+                      }
                     }
                   }
                 }
