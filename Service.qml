@@ -23,6 +23,8 @@ import qs.Ui
 //   windowPicker  clicking an app with several windows: "aerial" opens
 //             Aerial's overview on just that app's windows; "cycle" focuses
 //             them in turn
+//   classAliases  {"<regex on window class>": "<desktop id>"} for apps whose
+//             class matches no desktop entry (e.g. MATLAB's versioned class)
 Item {
   id: root
   width: 0
@@ -35,6 +37,8 @@ Item {
   readonly property string configPath: Quickshell.env("HOME") + "/.config/omarchy/dock.json"
   property var config: ({})
   readonly property var pinned: Array.isArray(config.pinned) ? config.pinned : []
+  readonly property var classAliases: config.classAliases && typeof config.classAliases === "object" ? config.classAliases : ({})
+  onClassAliasesChanged: { idCache = ({}); scheduleRebuild() }
   readonly property int iconSize: Math.max(24, Number(config.iconSize) || 38)
   readonly property real magnify: Math.max(1, Math.min(2, Number(config.magnify) || 1.45))
   readonly property bool slideToWindow: config.slideToWindow !== false
@@ -189,7 +193,11 @@ Item {
   function keyForClass(cls) {
     if (root.idCache[cls] !== undefined) return root.idCache[cls]
     var entry = null
-    try { entry = DesktopEntries.heuristicLookup(cls) } catch (e) {}
+    for (var re in root.classAliases) {
+      try { if (new RegExp(re).test(cls)) entry = root.entryFor(String(root.classAliases[re])) } catch (e) {}
+      if (entry) break
+    }
+    if (!entry) try { entry = DesktopEntries.heuristicLookup(cls) } catch (e) {}
     var key = entry ? String(entry.id).replace(/\.desktop$/, "") : "class:" + cls
     root.idCache[cls] = key
     return key
