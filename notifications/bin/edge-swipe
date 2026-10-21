@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""Two-finger trackpad swipes for the notification center, streamed to the shell.
+
+libinput hands two fingers to the compositor as scroll deltas with no start
+position, so Hyprland can't see a swipe that begins at the pad's edge. This
+reads the touchpad's raw multitouch events instead (read-only, never grabbed:
+scrolling keeps working) and prints the gesture on stdout, one line per frame,
+for Service.qml to forward to the panel:
+
+    begin open        two fingers landed at the right edge and moved left
+    begin close       two fingers moved right (the panel ignores it when shut)
+    move <p>          progress along that direction, 1.0 = one full panel width
+    end <p> <v>       fingers lifted; v is progress per second along it
+
+Needs read access to the touchpad device; a udev rule tagging
+ID_INPUT_TOUCHPAD with uaccess grants that to the logged-in user alone.
+Sleeps in read() until the pad is touched.
+"""
+import fcntl
+import os
+import struct
+import sys
+import time
+
+# Fractions of the touchpad's width.
+EDGE = 0.08      # both fingers must land within this strip to open
+FULL = 0.30      # finger travel that moves the panel its whole width
+DECIDE = 0.015   # travel before a touch counts as a horizontal swipe
+
+EV_SYN, EV_ABS = 0x00, 0x03
+SYN_REPORT = 0
+ABS_MT_SLOT, ABS_MT_POSITION_X, ABS_MT_POSITION_Y, ABS_MT_TRACKING_ID = 0x2F, 0x35, 0x36, 0x39
+EVENT = struct.Struct("llHHi")  # struct input_event on 64-bit
+
+
+def emit(line):
+    sys.stdout.write(line + "\n")
+    sys.stdout.flush()
+
+
+def eviocgabs(code):
+    # _IOR('E', 0x40 + code, struct input_absinfo): six __s32
+    return (2 << 30) | (24 << 16) | (ord("E") << 8) | (0x40 + code)
+
+
+def find_touchpad():
+    with open("/proc/bus/input/devices") as f:
+        for block in f.read().split("\n\n"):
+            if "Touchpad" not in block:
+                continue
+            for line in block.splitlines():
+                if line.startswith("H: Handlers="):
+                    for handler in line.split("=", 1)[1].split():
+                        if handler.startswith("event"):
+                            return "/dev/input/" + handler
+    return None
+
+
+def abs_range(fd, code):
+    _, minimum, maximum, *_ = struct.unpack("6i", fcntl.ioctl(fd, eviocgabs(code), bytes(24)))
+    return minimum, maximum
+
+
+class Tracker:
+    def __init__(self, xmin, xmax):
+        self.width = xmax - xmin
+        self.edge_x = xmax - EDGE * self.width
+        self.reset()
+
+    def reset(self):
+        self.state = "idle"     # idle | pending | open | close | ignore
+        self.edge = False
+        self.x0 = self.y0 = 0.0
+        self.samples = []       # (t, progress) for the release velocity
+
+    def progress(self, cx):
+        sign = -1 if self.state == "open" else 1
+        return sign * (cx - self.x0) / (FULL * self.width)
+
+    def frame(self, t, fingers):
+        count = len(fingers)
+        if count != 2:
+            if self.state in ("open", "close"):
+                p = self.samples[-1][1] if self.samples else 0.0
+                emit(f"end {p:.4f} {self.velocity(t):.4f}")
+            self.reset()
+            return
+        cx = (fingers[0][1] + fingers[1][1]) / 2
+        cy = (fingers[0][2] + fingers[1][2]) / 2
+        if self.state == "idle":
+            self.state = "pending"
+            self.edge = all(f[1] >= self.edge_x for f in fingers)
+            self.x0, self.y0 = cx, cy
+            return
+        if self.state == "pending":
+            dx, dy = cx - self.x0, cy - self.y0
+            if max(abs(dx), abs(dy)) < DECIDE * self.width:
+                return
+            if abs(dx) <= 1.2 * abs(dy):
+                self.state = "ignore"       # a vertical scroll
+            elif dx < 0 and self.edge:
+                self.state = "open"
+            elif dx > 0:
+                self.state = "close"
+            else:
+                self.state = "ignore"       # leftward, but not from the edge
+            if self.state == "ignore":
+                return
+            emit("begin " + self.state)
+        if self.state in ("open", "close"):
+            p = self.progress(cx)
+            self.samples.append((t, p))
+            self.samples = [s for s in self.samples if t - s[0] <= 0.08]
+            emit(f"move {p:.4f}")
+
+    def velocity(self, t):
+        recent = [s for s in self.samples if t - s[0] <= 0.08]
+        if len(recent) < 2 or recent[-1][0] - recent[0][0] < 0.01:
+            return 0.0
+        return (recent[-1][1] - recent[0][1]) / (recent[-1][0] - recent[0][0])
+
+
+def run(path):
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        tracker = Tracker(*abs_range(fd, ABS_MT_POSITION_X))
+        slots = {}  # slot -> [tracking_id, x, y]
+        slot = 0
+        down = 0    # slots with a finger on the pad
+        while True:
+            data = os.read(fd, EVENT.size * 64)
+            usable = len(data) - len(data) % EVENT.size
+            for sec, usec, etype, code, value in EVENT.iter_unpack(memoryview(data)[:usable]):
+                if etype == EV_ABS:
+                    if code == ABS_MT_SLOT:
+                        slot = value
+                        continue
+                    s = slots.setdefault(slot, [-1, 0, 0])
+                    if code == ABS_MT_TRACKING_ID:
+                        s[0] = value
+                        # Recounted rather than stepped, so a SYN_DROPPED gap
+                        # can't leave the count off for good.
+                        down = sum(1 for t in slots.values() if t[0] != -1)
+                    elif code == ABS_MT_POSITION_X:
+                        s[1] = value
+                    elif code == ABS_MT_POSITION_Y:
+                        s[2] = value
+                elif etype == EV_SYN and code == SYN_REPORT:
+                    # Ordinary one-finger pointing: an idle tracker would only
+                    # reset itself, so skip building the frame at all.
+                    if down < 2 and tracker.state == "idle":
+                        continue
+                    tracker.frame(sec + usec / 1e6, [s for s in slots.values() if s[0] != -1])
+    finally:
+        os.close(fd)
+
+
+def main():
+    while True:
+        path = find_touchpad()
+        if path is None:
+            print("edge-swipe: no touchpad found; retrying", file=sys.stderr)
+            time.sleep(5)
+            continue
+        try:
+            run(path)
+        except OSError as e:
+            # Device vanished (suspend/resume, driver reload) or no access yet.
+            print(f"edge-swipe: {path}: {e}; retrying", file=sys.stderr)
+            time.sleep(2)
+
+
+if __name__ == "__main__":
+    main()
