@@ -3,6 +3,8 @@
 A window overview, a dock and a notification center for
 [Omarchy](https://omarchy.org), made to move together.
 
+![The overview, open on a desktop with three windows, the desktops along the top and the dock below](docs/overview.webp)
+
 - **Overview.** Swipe up with three fingers and every window on the desktop
   spreads out, live, with your desktops along the top. Swipe sideways to
   slide between desktops, on the bare desktop too. Drop a window on another
@@ -14,6 +16,11 @@ A window overview, a dock and a notification center for
 - **Notification center.** A sheet that slides in from the right edge, with
   notifications stacked by app, search, history and do not disturb. Swipe in
   with two fingers from the edge of the touchpad to open it.
+
+| | |
+|---|---|
+| ![A desktop with the dock along the bottom](docs/desktop.webp) | ![The notification center open along the right edge, with notifications stacked by app](docs/notifications.webp) |
+| The dock | The notification center |
 
 The three know about each other: the sheet steps aside under your fingers as
 you swipe the overview up, the overview keeps its desktop dots above the
@@ -59,12 +66,14 @@ everything else works and the bell still opens the sheet.
 
 - **Overview:** three fingers up to open, down to close, sideways to change
   desktop. Four fingers up shows every window on every desktop.
-- **Settings:** the button beside the bell. Frosted glass, desktop swipes,
+- **Settings:** the button beside the bell, dropping down from the bar. Frosted glass, desktop swipes,
   all screens switching together, and keyboard shortcuts (written to their
   own section of `~/.config/hypr/bindings.lua`).
 - **Notification center:** click the bell, or swipe in from the right edge.
   Its own settings are under **⋯** in the sheet. More in
   [notifications/README.md](notifications/README.md).
+
+![The overview's settings panel, below the bar](docs/settings.webp)
 
 ### All screens together
 
