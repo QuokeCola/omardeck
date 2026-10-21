@@ -257,7 +257,7 @@ PanelWindow {
   readonly property var monitorWindows: {
     const out = []
     for (const win of overlay.shot) {
-      if (win.monitor !== surface.monitorName) continue
+      if (overlay.screenOf(win) !== surface.monitorName) continue
       out.push(win)
     }
     return out
@@ -654,7 +654,10 @@ PanelWindow {
               // The desktop the spread is showing, which sliding moves before the
               // compositor has caught up.
               readonly property bool focused: space.modelData.id === surface.ringWorkspace
+              // On the screen the window is over: every screen has a tile for
+              // each desktop.
               readonly property bool targeted: overlay.dragTarget === space.modelData.id
+                                               && overlay.dragScreen === surface.monitorName
               readonly property bool peeked: overlay.peek === space.modelData.id
               // Live while open, so a window dropped here shows up where
               // Hyprland actually puts it, and the others make room.
@@ -844,9 +847,11 @@ PanelWindow {
         id: tiledLayer
         anchors.fill: parent
 
+        // Diffed rather than replaced: a window carried here from another
+        // screen adds its own card, and every other card keeps its capture.
         Repeater {
           id: tiledCards
-          model: surface.monitorWindows.filter(w => !w.floating)
+          model: ScriptModel { values: surface.monitorWindows.filter(w => !w.floating) }
           delegate: cardDelegate
         }
       }
@@ -858,8 +863,63 @@ PanelWindow {
 
       Repeater {
         id: floatCards
-        model: surface.monitorWindows.filter(w => w.floating)
+        model: ScriptModel { values: surface.monitorWindows.filter(w => w.floating) }
         delegate: cardDelegate
+      }
+    }
+
+    // A window being carried over this screen from another one. Its card
+    // stays with the screen it was picked up on, which has the pointer until
+    // the button comes up; here it is drawn again where it is, from its own
+    // capture, so it crosses the gap between screens as one card. Held after
+    // the drop, where it was let go, until the window's new card here has a
+    // frame to take over with.
+    Item {
+      id: visitor
+      readonly property bool carried: overlay.dragKey !== "" && overlay.dragHome !== surface.monitorName
+      readonly property bool landing: overlay.arrival !== null && overlay.arrival.screen === surface.monitorName
+      readonly property rect at: visitor.landing ? overlay.arrival.rect : overlay.dragRect
+      readonly property real originX: surface.monitor ? surface.monitor.x : 0
+      readonly property real originY: surface.monitor ? surface.monitor.y : 0
+      x: visitor.at.x - visitor.originX
+      y: visitor.at.y - visitor.originY
+      width: visitor.at.width
+      height: visitor.at.height
+      visible: (visitor.carried || visitor.landing) && visitor.width > 0
+               && visitor.x < surface.width && visitor.x + visitor.width > 0
+               && visitor.y < surface.height && visitor.y + visitor.height > 0
+      opacity: 0.94
+
+      Rectangle {
+        id: visitorFrame
+        anchors.fill: parent
+        readonly property real radius: surface.rounded(14)
+        layer.enabled: visitorFrame.radius > 0.5
+        layer.effect: ShaderEffect {
+          property vector2d size: Qt.vector2d(visitorFrame.width, visitorFrame.height)
+          property real radius: visitorFrame.radius
+          fragmentShader: Qt.resolvedUrl("deco/clip.frag.qsb")
+        }
+        opacity: overlay.dragOpacity
+        color: "#101014"
+
+        ScreencopyView {
+          id: visitorShot
+          anchors.fill: parent
+          // From the moment anything is picked up, on every screen it might
+          // be carried to, so the first frame is in before it arrives.
+          captureSource: visitor.carried || visitor.landing ? overlay.dragCapture : null
+          live: visitor.carried || visitor.landing
+          opacity: 0.999
+        }
+      }
+
+      Rectangle {
+        anchors.fill: parent
+        radius: visitorFrame.radius
+        color: "transparent"
+        border.width: 1
+        border.color: Qt.rgba(1, 1, 1, 0.22)
       }
     }
 
@@ -1043,6 +1103,51 @@ PanelWindow {
         readonly property bool picked: card.hovered || overlay.selectedKey === card.modelData.key
         readonly property bool dragging: dragger.active
         readonly property bool landing: overlay.dropOnKey === card.modelData.key
+        // Let go on another screen, and gone there: hidden here until the
+        // card on that screen takes over and this one is taken away.
+        property bool handedOver: false
+        // Carried here from another screen: hidden until it has a frame, with
+        // the stand-in (`visitor`) showing where it was let go meanwhile.
+        readonly property bool awaited: overlay.arrival !== null && overlay.arrival.key === card.modelData.key
+                                        && overlay.arrival.screen === surface.monitorName
+        // Where it is as held, scaled about its middle, in layout coordinates:
+        // where the other screens draw it.
+        readonly property rect heldRect: {
+          if (!card.dragging) return Qt.rect(0, 0, 0, 0)
+          const w = card.width * card.scale
+          const h = card.height * card.scale
+          const ox = surface.monitor ? surface.monitor.x : 0
+          const oy = surface.monitor ? surface.monitor.y : 0
+          return Qt.rect(ox + card.x + (card.width - w) / 2, oy + card.y + (card.height - h) / 2, w, h)
+        }
+        onHeldRectChanged: if (card.dragging) overlay.dragRect = card.heldRect
+
+        /** Carried here from another screen and let go: from where it was let
+            go, into its place here — its slot, or its desktop's tile. */
+        function arrive() {
+          const r = overlay.arrival.rect
+          const ox = surface.monitor ? surface.monitor.x : 0
+          const oy = surface.monitor ? surface.monitor.y : 0
+          const from = Qt.rect(r.x - ox, r.y - oy, r.width, r.height)
+          if (card.here) {
+            card.backFrom = from
+            card.back = 0
+            comingBack.restart()
+          } else {
+            card.flyFrom = from
+            card.released = true
+            card.leftAway = true
+            card.fly = 0
+            flight.restart()
+          }
+          card.tookOver = true
+          overlay.arrival = null
+          Qt.callLater(() => card.tookOver = false)
+        }
+        Component.onCompleted: if (card.awaited && shot.hasContent) card.arrive()
+        // Taking over from the stand-in in one frame: faded in, it showed a
+        // gap where the window had just been let go.
+        property bool tookOver: false
         // Resolved once per card rather than per frame: a desktop-entry search
         // is a directory walk.
         readonly property string icon: overlay.iconFor(card.modelData.appId)
@@ -1250,7 +1355,8 @@ PanelWindow {
         scale: card.flying ? 1
              : card.dragging ? (overlay.dragTarget > 0 ? card.tileScale : (overlay.dropOnKey !== "" ? 0.4 : 0.82))
              : (card.picked && overlay.active ? 1.035 : 1)
-        opacity: card.flying ? overlay.veil
+        opacity: card.handedOver || card.awaited ? 0
+               : card.flying ? overlay.veil
                : card.shown ? (card.dragging ? 0.94 : 1)
                : card.fading ? Math.max(1 - surface.appVeil, 1 - card.along * 2.5) : 0
         visible: card.opacity > 0.01
@@ -1264,7 +1370,7 @@ PanelWindow {
         // Nor one fading with the overview: that follows `t` every frame, and a
         // Behavior restarted every frame never leaves where it started — the
         // window popped in whole once the overview had gone.
-        Behavior on opacity { enabled: !surface.sliding && !card.parked && !card.fading; NumberAnimation { duration: 150 } }
+        Behavior on opacity { enabled: !surface.sliding && !card.parked && !card.fading && !card.awaited && !card.tookOver; NumberAnimation { duration: 150 } }
 
         // Hyprland's rounding on the desktop, the overview's own once spread,
         // never rounder than Hyprland's.
@@ -1409,6 +1515,7 @@ PanelWindow {
             onStopped: shot.restart("stopped")
             onHasContentChanged: if (shot.hasContent) {
               shot.restarts = 0
+              if (card.awaited) card.arrive()
               if (surface.missed[card.modelData.key]) {
                 const missed = Object.assign({}, surface.missed)
                 delete missed[card.modelData.key]
@@ -1439,7 +1546,7 @@ PanelWindow {
             // Live only until its first frame is in: a card waits for its
             // capture before the overview can appear, and live, the first
             // frame arrives as soon as the compositor can give it.
-            live: card.shown && overlay.opened && !shot.hasContent
+            live: (card.shown || card.awaited) && overlay.opened && !shot.hasContent
           }
 
           // Failing without saying so: on screen, open, and still no frame.
@@ -1520,12 +1627,29 @@ PanelWindow {
 
           onActiveChanged: {
             if (dragger.active) {
+              overlay.dragHome = surface.monitorName
+              overlay.dragScreen = surface.monitorName
+              overlay.dragCapture = card.modelData.capture
+              overlay.dragOpacity = card.real.opacity ?? 1
+              overlay.dragRect = card.heldRect
               overlay.dragKey = card.modelData.key
               overlay.selectedKey = card.modelData.key
               card.grabX = dragger.centroid.pressPosition.x
               card.grabY = dragger.centroid.pressPosition.y
               card.centering = 0
               centeringOn.restart()
+            } else if (overlay.dragScreen !== "" && overlay.dragScreen !== surface.monitorName) {
+              // Let go over another screen: the window goes there, and its
+              // card there takes over (see `arrive`) — or, if it could not
+              // go, back to its place here.
+              if (overlay.drop(card.modelData.key)) {
+                card.handedOver = true
+              } else {
+                card.backFrom = card.lastDrag
+                card.back = 0
+                comingBack.restart()
+              }
+              overlay.dragKey = ""
             } else {
               const here = overlay.synced ? overlay.wsOf(card.modelData) : overlay.focusedDesk
               if (overlay.dragTarget > 0 && overlay.dragTarget !== here) {
@@ -1548,6 +1672,20 @@ PanelWindow {
             if (!dragger.active) return
             card.lastDrag = Qt.rect(card.x, card.y, card.width, card.height)
             const at = dragger.centroid.scenePosition
+            // Still this surface's, even off its edge: the pointer stays with
+            // where the button went down. Over another screen, that screen's
+            // strip is what it can be dropped on.
+            const ox = surface.monitor ? surface.monitor.x : 0
+            const oy = surface.monitor ? surface.monitor.y : 0
+            const over = overlay.surfaceAt(ox + at.x, oy + at.y)
+            if (over && over !== surface) {
+              const lx = ox + at.x - over.monitor.x
+              const ly = oy + at.y - over.monitor.y
+              overlay.dragScreen = over.monitorName
+              overlay.aimDrag(over.workspaceAtPoint(lx, ly), "")
+              return
+            }
+            if (over) overlay.dragScreen = surface.monitorName
             overlay.aimDrag(surface.workspaceAtPoint(at.x, at.y), surface.cardAtPoint(at.x, at.y))
           }
         }

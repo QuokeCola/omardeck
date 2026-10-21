@@ -461,7 +461,7 @@ Scope {
     for (const y of b) byKey[y.key] = y
     for (const x of a) {
       const y = byKey[x.key]
-      if (!y || root.spaceOf(x) !== y.workspace || x.monitor !== y.monitor || x.floating !== y.floating)
+      if (!y || root.spaceOf(x) !== y.workspace || root.screenOf(x) !== y.monitor || x.floating !== y.floating)
         return false
       // Same address, new Wayland toplevel: a window hidden and shown again
       // (Zoom's meeting window around a screen share) keeps its address but
@@ -478,6 +478,17 @@ Scope {
   // on screen flashing because one of them moved. So the move is written down
   // here instead, and everything asks `wsOf` where a window is.
   property var moved: ({})
+
+  // The same, for windows carried to another screen: the screen they went
+  // to. A window's card belongs to its screen's surface; moved there, its card
+  // is built anew on that screen and nothing else is rebuilt.
+  property var movedScreen: ({})
+
+  /** The screen a window is on, as far as the overview is concerned. */
+  function screenOf(win) {
+    const to = root.movedScreen[win.key]
+    return to !== undefined ? to : win.monitor
+  }
 
   /** The workspace a window is on, as far as the overview is concerned. */
   function spaceOf(win) {
@@ -556,6 +567,7 @@ Scope {
     if (!root.sameWindows(root.shot, next)) {
       root.shot = next
       root.moved = ({})
+      root.movedScreen = ({})
     }
     root.workspaces = root.liveWorkspaces()
     root.plans = root.livePlans
@@ -579,6 +591,8 @@ Scope {
     root.dragKey = ""
     root.dragTarget = -1
     root.dropOnKey = ""
+    root.dragScreen = ""
+    root.arrival = null
     root.filter = ""
     root.peek = -1
     root.peekWanted = -1
@@ -635,6 +649,46 @@ Scope {
     peeking.stop()
     root.peekWanted = -1
     root.peek = -1
+  }
+
+  // A window carried off its own screen. The card stays on the surface it
+  // was picked up on, which keeps the pointer for as long as the button is
+  // held, wherever it goes; every other screen draws a stand-in for it where
+  // it is (see `visitor` in Surface.qml), so it reads as one card crossing
+  // over. In layout coordinates, as Hyprland places monitors.
+  property string dragScreen: ""
+  property string dragHome: ""
+  property rect dragRect: Qt.rect(0, 0, 0, 0)
+  property var dragCapture: null
+  property real dragOpacity: 1
+
+  // Let go on another screen: where it was let go, until its new card there
+  // has a frame and can take over from the stand-in.
+  property var arrival: null
+  Timer {
+    id: arrivalWatchdog
+    interval: 600
+    onTriggered: root.arrival = null
+  }
+
+  // Every screen's surface, by monitor name.
+  property var surfaces: ({})
+  function enrol(surface, name) {
+    const next = Object.assign({}, root.surfaces)
+    if (surface) next[name] = surface
+    else delete next[name]
+    root.surfaces = next
+  }
+
+  /** The surface under a point in layout coordinates, or null. */
+  function surfaceAt(gx, gy) {
+    for (const name in root.surfaces) {
+      const s = root.surfaces[name]
+      const mon = s.monitor
+      if (!mon) continue
+      if (gx >= mon.x && gx < mon.x + s.width && gy >= mon.y && gy < mon.y + s.height) return s
+    }
+    return null
   }
 
   function aimDrag(workspaceId, cardKey) {
@@ -1223,13 +1277,18 @@ Scope {
   function drop(address) {
     const space = root.dragTarget
     const onto = root.dropOnKey
+    const screen = root.dragScreen
     root.dragTarget = -1
     root.dropOnKey = ""
-    if (!address) return
+    root.dragScreen = ""
+    if (!address) return false
+
+    const win = root.shot.find(w => w.key === address)
+    if (win && screen !== "" && screen !== root.screenOf(win))
+      return root.dropOnScreen(win, screen, space)
 
     // With every screen as one desktop, a tile is that desktop on the screen
     // the window is on: dropped there, it changes desktop, not screen.
-    const win = root.shot.find(w => w.key === address)
     const here = root.synced && win ? root.wsOf(win) : root.focusedDesk
     const target = root.synced && win ? root.spaceOn(space, win.monitor) : space
     if (space > 0 && space !== here) {
@@ -1251,12 +1310,49 @@ Scope {
       Hyprland.dispatch('hl.dsp.window.swap({ window = "address:0x' + address
                         + '", target = "address:0x' + onto + '" })')
     } else {
-      return
+      return false
     }
     // The overview stays open, the way it does on a Mac: you are usually
     // moving more than one thing.
     if (root.service) root.service.refreshModels()
     resettle.restart()
+    return true
+  }
+
+  /** Let go over another screen: to the desktop tile it is over there, or
+      else to the desktop that screen is showing. True if it went. */
+  function dropOnScreen(win, screen, space) {
+    const there = root.surfaces[screen]
+    if (!there) return false
+    const desk = space > 0 ? space : there.shownWorkspace
+    if (!(desk > 0)) return false
+    const target = root.synced ? root.spaceOn(desk, screen) : desk
+    // Apart, a tile is a workspace wherever it is; one not made yet is made
+    // where it is asked for.
+    const real = (Hyprland.workspaces.values || []).find(w => w.id === target)
+    const lands = !root.synced && real && real.monitor ? real.monitor.name : screen
+    if (target === root.spaceOf(win) && lands === root.screenOf(win)) return false
+
+    Hyprland.dispatch('hl.dsp.window.move({ window = "address:0x' + win.key
+                      + '", workspace = "' + target + '", follow = false })')
+    if (space > 0) root.noPeekId = space
+    root.arrival = { key: win.key, screen: lands, rect: root.dragRect }
+    arrivalWatchdog.restart()
+    const next = Object.assign({}, root.moved)
+    next[win.key] = target
+    root.moved = next
+    // Not from inside the drag that is ending: moving the window takes its
+    // card off this screen, and that card is the one still handling it.
+    Qt.callLater(() => {
+      const away = Object.assign({}, root.movedScreen)
+      away[win.key] = lands
+      root.movedScreen = away
+      // The pointer is over there now, and so is the work.
+      root.leadTo(screen)
+    })
+    if (root.service) root.service.refreshModels()
+    resettle.restart()
+    return true
   }
 
   function moveSelection(dx, dy) {
@@ -1359,7 +1455,11 @@ Scope {
       overlay: root
       screenInfo: modelData
       onLeadingChanged: if (leading) root.leadSurface = this
-      Component.onCompleted: if (leading) root.leadSurface = this
+      Component.onCompleted: {
+        if (leading) root.leadSurface = this
+        root.enrol(this, monitorName)
+      }
+      Component.onDestruction: root.enrol(null, monitorName)
     }
   }
 }
