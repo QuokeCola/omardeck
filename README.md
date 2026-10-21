@@ -5,7 +5,8 @@ A window overview, a dock and a notification center for
 
 ![The overview, open on a desktop with three windows, the desktops along the top and the dock below](docs/overview.webp)
 
-- **Overview.** Swipe up with three fingers and every window on the desktop
+- **Overview**, from [Aerial](https://github.com/ReidenXerx/omarchy-aerial)
+  by ReidenXerx. Swipe up with three fingers and every window on the desktop
   spreads out, live, with your desktops along the top. Swipe sideways to
   slide between desktops, on the bare desktop too. Drop a window on another
   desktop to send it there.
@@ -13,7 +14,9 @@ A window overview, a dock and a notification center for
   only while a window actually covers it. Click an app with several windows
   and the overview opens on just those; click one whose window is on another
   desktop and the overview slides you there.
-- **Notification center.** A sheet that slides in from the right edge, with
+- **Notification center**, from
+  [Foamy Notification Center](https://github.com/foamrider/foamy-notification-center)
+  by foamrider. A sheet that slides in from the right edge, with
   notifications stacked by app, search, history and do not disturb. Swipe in
   with two fingers from the edge of the touchpad to open it.
 
