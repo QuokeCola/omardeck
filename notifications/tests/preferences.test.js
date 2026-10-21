@@ -10,7 +10,7 @@ test('settings validate integers and booleans without coercion and keep scopes s
   assert.equal(P.value('popups',{},'compact'),true)
 })
 test('saving routes widget and service settings to their existing owners', () => {
-  assert.deepEqual(P.saveCommand('center','compact',true,'/helper'), ['omarchy-shell','shell','setBarWidget','foamy.notification-center','compact',' true','{}'])
+  assert.deepEqual(P.saveCommand('center','compact',true,'/helper'), ['omarchy-shell','shell','setBarWidget','quokecola.omardeck','compact',' true','{}'])
   assert.deepEqual(P.saveCommand('popups','normalTimeoutSec',12,'/helper'), ['python3','/helper','save','normalTimeoutSec','12'])
   assert.deepEqual(P.saveCommand('popups','browserGrouping','hostname','/helper'), [])
 })

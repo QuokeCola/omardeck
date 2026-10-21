@@ -19,7 +19,7 @@ for name in ["Commons", "Ui"]:
 home = base / "home"
 config = home / ".config/omarchy/shell.json"
 config.parent.mkdir(parents=True)
-original = {"version": 1, "other": "preserved", "bar": {"layout": {"right": [{"id": "foamy.notification-center", "language": "nb", "browserGrouping": "hostname"}]}}, "plugins": [{"id": "foamy.notifications", "browserGrouping": "hostname", "useBrowserFavicons": True}]}
+original = {"version": 1, "other": "preserved", "bar": {"layout": {"right": [{"id": "quokecola.omardeck", "language": "nb", "browserGrouping": "hostname"}]}}, "plugins": [{"id": "foamy.notifications", "browserGrouping": "hostname", "useBrowserFavicons": True}]}
 config.write_text(json.dumps(original))
 cli = base / "bin"
 cli.mkdir()
@@ -74,7 +74,7 @@ ShellRoot {
     function setBarWidget(id: string, key: string, valueJson: string, selectorJson: string): string {
       if (root.failSave) return "fixture save failure"
       var next = JSON.parse(configFile.text())
-      if (id !== "foamy.notification-center") return "invalid widget"
+      if (id !== "quokecola.omardeck") return "invalid widget"
       next.bar.layout.right[0][key] = JSON.parse(valueJson)
       configFile.setText(JSON.stringify(next))
       root.config = next

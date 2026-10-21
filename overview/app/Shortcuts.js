@@ -4,7 +4,7 @@
 // Omarchy bindings file (~/.config/hypr/bindings.lua):
 //
 //   -- >>> aerial ...
-//   o.bind("SUPER + A", "Aerial: Overview", "omarchy-shell shell toggle reidenxerx.aerial")
+//   o.bind("SUPER + A", "Aerial: Overview", "omarchy-shell shell toggle quokecola.omardeck")
 //   -- <<< aerial
 //
 // Everything outside the markers is the user's and is left exactly as it is.
@@ -20,7 +20,7 @@ var ACTIONS = [
     id: "overview",
     label: "Open overview",
     description: "Aerial: Overview",
-    dispatcher: '"omarchy-shell shell toggle reidenxerx.aerial"',
+    dispatcher: '"omarchy-shell shell toggle quokecola.omardeck"',
   },
   {
     id: "prev",

@@ -32,7 +32,7 @@ function value(scope,settings,key) {
 function saveCommand(scope,key,next,helper) {
   if (!valid(scope,key,next)) return []
   // Leading whitespace keeps boolean JSON out of the IPC CLI's option parser.
-  if (scope === "center") return ["omarchy-shell","shell","setBarWidget","foamy.notification-center",key," " + JSON.stringify(next),"{}"]
+  if (scope === "center") return ["omarchy-shell","shell","setBarWidget","quokecola.omardeck",key," " + JSON.stringify(next),"{}"]
   return ["python3",helper,"save",key,JSON.stringify(next)]
 }
 function optionLabel(option) { return {browser:"Browser",hostname:"Hostname",none:"Do not group"}[option] || option }

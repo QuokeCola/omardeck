@@ -1,23 +1,36 @@
 {
   "schemaVersion": 1,
-  "id": "foamy.notification-center",
-  "name": "Foamy Notification Center",
-  "version": "1.0.0",
-  "author": "foamrider",
-  "description": "Notification history with app stacks, search, and do not disturb",
-  "homepage": "https://github.com/foamrider/foamy-notification-center",
+  "id": "quokecola.omardeck",
+  "name": "Omardeck",
+  "version": "0.1.0",
+  "author": "QuokeCola",
   "license": "MIT",
+  "homepage": "https://github.com/QuokeCola/omardeck",
+  "description": "A window overview you swipe up with three fingers, a dock along the bottom of the screen, and a notification center that slides in from the edge, made to move together. Builds on Aerial by ReidenXerx and Foamy Notification Center by foamrider.",
+  "category": "productivity",
+  "tags": [
+    "overview",
+    "mission-control",
+    "dock",
+    "notifications",
+    "gestures",
+    "touchpad",
+    "workspaces"
+  ],
   "kinds": [
     "service",
+    "overlay",
     "bar-widget"
   ],
+  "keepLoaded": true,
   "entryPoints": {
     "service": "Service.qml",
-    "barWidget": "Panel.qml"
+    "overlay": "overview/shell/Overlay.qml",
+    "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Notification Center",
-    "description": "Every notification you were sent, kept, and readable again",
+    "displayName": "Omardeck",
+    "description": "The notification bell, and a button for the overview's settings",
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "right",
@@ -33,9 +46,20 @@
       "showPreview": true,
       "compact": false,
       "useBrowserFavicons": true,
-      "browserGrouping": "browser"
+      "browserGrouping": "browser",
+      "frost": true,
+      "deskSwipe": true,
+      "syncScreens": false,
+      "overviewButton": true
     },
     "schema": [
+      {
+        "key": "overviewButton",
+        "type": "boolean",
+        "label": "Overview button",
+        "defaultValue": true,
+        "description": "A button beside the bell that opens the overview's settings: frosted glass, desktop swipes, screens switching together, and keyboard shortcuts."
+      },
       {
         "key": "compact",
         "type": "boolean",

@@ -14,14 +14,14 @@ import "../app/Shortcuts.js" as Shortcuts
 // app/Shortcuts.js). Shortcuts are edited here and only written on Save.
 Panel {
   id: root
-  moduleName: "reidenxerx.aerial"
-  ipcTarget: "reidenxerx.aerial.settings"
+  moduleName: "quokecola.omardeck"
+  ipcTarget: "quokecola.omardeck.overview"
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
   readonly property var service: root.bar && root.bar.shell && typeof root.bar.shell.serviceFor === "function"
-                                 ? root.bar.shell.serviceFor("reidenxerx.aerial") : null
+                                 ? root.bar.shell.serviceFor(root.moduleName)?.overview ?? null : null
 
   // ------------------------------------------------------------- switches
 
@@ -57,7 +57,7 @@ Panel {
     running: !root.service
     onTriggered: {
       const found = root.bar && root.bar.shell && typeof root.bar.shell.serviceFor === "function"
-                    ? root.bar.shell.serviceFor("reidenxerx.aerial") : null
+                    ? root.bar.shell.serviceFor(root.moduleName)?.overview ?? null : null
       if (found) root.pushSettings()
     }
   }

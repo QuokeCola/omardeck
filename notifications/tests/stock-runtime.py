@@ -27,7 +27,7 @@ env=dict(os.environ,HOME=str(home),XDG_CONFIG_HOME=str(home/'.config'),XDG_STATE
 for k in ['DISPLAY','WAYLAND_DISPLAY','HYPRLAND_INSTANCE_SIGNATURE']:env.pop(k,None)
 log=(base/'log').open('w');proc=subprocess.Popen(['qs','-p',str(app),'--no-color'],env=env,stdout=log,stderr=log,start_new_session=True)
 def ipc(t,*args):return subprocess.check_output(['qs','ipc','-n','-p',str(app),'call',t,*args],env=env,text=True,timeout=3).strip()
-def status():return json.loads(ipc('foamy.notification-center.test','state'))
+def status():return json.loads(ipc('quokecola.omardeck.notifications.test','state'))
 def wait(fn):
  end=time.monotonic()+5
  while time.monotonic()<end:
@@ -49,7 +49,7 @@ try:
  ipc('review','toggle');wait(lambda:status()['doNotDisturb']);assert ipc('notifications','dndState')=='on'
  send('Stock silenced');wait(lambda:status()['entries']==2)
  ipc('review','toggle');wait(lambda:not status()['doNotDisturb'])
- ipc('foamy.notification-center.test','clear');wait(lambda:status()['entries']==0)
+ ipc('quokecola.omardeck.notifications.test','clear');wait(lambda:status()['entries']==0)
  send('After clear');wait(lambda:status()['entries']==1)
  ipc('review','focus');wait(lambda:bool(status()['focusError']));assert status()['entries']==1
  clients.write_text(json.dumps([{'class':'Stock Review','address':'0x123'}]))

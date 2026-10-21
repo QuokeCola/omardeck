@@ -33,8 +33,8 @@ test('handled acknowledgement updates only memory after durable removal',()=>{
 })
 
 test('store commands cannot shadow panel open and close controls',()=>{
- assert.match(source,/target: "foamy.notification-center.store"/)
- assert.doesNotMatch(source,/target: "foamy.notification-center"/)
+ assert.match(source,/target: "quokecola.omardeck.notifications.store"/)
+ assert.doesNotMatch(source,/target: "quokecola.omardeck.notifications"/)
  const panel=fs.readFileSync(path.join(__dirname,'../Panel.qml'),'utf8')
- assert.match(panel,/ipcTarget: "foamy.notification-center"/)
+ assert.match(panel,/ipcTarget: "quokecola.omardeck.notifications"/)
 })

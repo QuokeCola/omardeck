@@ -48,8 +48,8 @@ Panel {
     controller.show()
   }
 
-  moduleName: "foamy.notification-center"
-  ipcTarget: "foamy.notification-center"
+  moduleName: "quokecola.omardeck"
+  ipcTarget: "quokecola.omardeck.notifications"
 
   readonly property string omarchyPath: Quickshell.env("OMARCHY_PATH")
 

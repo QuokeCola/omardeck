@@ -24,7 +24,8 @@ Scope {
 
   function findService() {
     if (root.service || !root.shell || typeof root.shell.serviceFor !== "function") return
-    root.service = root.shell.serviceFor("reidenxerx.aerial")
+    const found = root.shell.serviceFor(root.manifest ? root.manifest.id : "quokecola.omardeck")
+    root.service = found ? found.overview : null
   }
 
   onShellChanged: root.findService()

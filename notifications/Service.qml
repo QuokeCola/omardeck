@@ -408,8 +408,8 @@ Item {
 
   // Popup actions use public IPC because plugins cannot call each other's services.
   IpcHandler {
-    // The panel owns foamy.notification-center (open/close); the store needs a distinct target.
-    target: "foamy.notification-center.store"
+    // The panel owns quokecola.omardeck.notifications (open/close); the store needs a distinct target.
+    target: "quokecola.omardeck.notifications.store"
     function remove(keysCsv: string): string {
       var keys = keysCsv.split(",")
       if (!Array.isArray(keys) || keys.length > 100 || keys.some(function(key) {
@@ -431,7 +431,7 @@ Item {
   }
 
   IpcHandler {
-    target: "foamy.notification-center.test"
+    target: "quokecola.omardeck.notifications.test"
 
     // Feed a fake trackpad swipe frame, as bin/edge-swipe would.
     function swipe(kind: string, progress: real, velocity: real): string {
