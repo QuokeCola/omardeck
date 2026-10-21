@@ -1,0 +1,34 @@
+Omardeck
+Copyright (c) 2026 Chen Qian (QuokeCola)
+
+Omardeck combines and modifies the following projects. Each keeps its own
+license file next to its code, and those licenses apply to that code, the
+modifications made here included. Everything else in this repository is
+under the MIT license in LICENSE.
+
+overview/  (the window overview)
+  Based on Aerial
+  https://github.com/ReidenXerx/omarchy-aerial
+  Copyright (c) 2026 DuduPhudu (ReidenXerx)
+  MIT license: overview/LICENSE
+
+notifications/  (the notification center)
+  Based on Foamy Notification Center
+  https://github.com/foamrider/foamy-notification-center
+  Copyright (c) 2026 foamrider, with contributions by Tomas Kirkegaard
+  MIT license: notifications/LICENSE
+
+  It includes, as that project does:
+  - Lucide icons, Copyright (c) 2026 Lucide Icons and Contributors,
+    ISC license: notifications/LICENSE-LUCIDE
+  - Code derived from Omarchy, Copyright (c) David Heinemeier Hansson,
+    MIT license: notifications/LICENSE-OMARCHY
+
+dock/  (the dock)
+  Copyright (c) 2026 Chen Qian (QuokeCola), MIT license: LICENSE
+
+The full history of each project, with its original authors, is kept in
+this repository's git history.
+
+Omardeck is an independent project. It is not affiliated with or endorsed
+by the authors of Aerial or Foamy Notification Center, or by Omarchy.

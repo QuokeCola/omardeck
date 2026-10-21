@@ -1,3 +1,5 @@
+> **In Omardeck:** this was the standalone `quokecola.dock` plugin. Configuration is described in the [main README](../README.md#the-dock).
+
 # Dock
 
 Omarchy shell service plugin (`quokecola.dock`): a bottom dock with pinned and

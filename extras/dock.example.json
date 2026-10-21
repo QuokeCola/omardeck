@@ -1,0 +1,10 @@
+{
+  "pinned": ["org.gnome.Nautilus", "chromium", "Alacritty"],
+  "iconSize": 38,
+  "height": 63,
+  "magnify": 1,
+  "autohide": "smart",
+  "slideToWindow": true,
+  "windowPicker": "aerial",
+  "classAliases": {}
+}

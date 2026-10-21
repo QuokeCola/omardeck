@@ -1,3 +1,5 @@
+> **In Omardeck:** this is the original project's documentation, kept for reference. It describes it as a plugin of its own; install Omardeck instead, as in the [main README](../README.md).
+
 # Aerial
 
 A window overview for [Omarchy](https://omarchy.org), in the shape of macOS's

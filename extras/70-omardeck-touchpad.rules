@@ -1,0 +1,5 @@
+# Lets the logged-in user read the touchpad (and only the touchpad), so the
+# notification center can follow a two-finger swipe in from the right edge.
+# Install: sudo cp 70-omardeck-touchpad.rules /etc/udev/rules.d/
+#          sudo udevadm control --reload && sudo udevadm trigger
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_TOUCHPAD}=="1", TAG+="uaccess"

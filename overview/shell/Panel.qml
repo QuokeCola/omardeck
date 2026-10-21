@@ -209,7 +209,7 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     text: "󰕰"
-    tooltipText: "Aerial"
+    tooltipText: "Overview"
     onPressed: function(b) {
       if (b === Qt.RightButton) {
         if (root.service) root.service.toggle()
@@ -299,7 +299,7 @@ Panel {
 
             Text {
               textFormat: Text.PlainText
-              text: "Aerial"
+              text: "Overview"
               color: root.bar.foreground
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.title
@@ -349,7 +349,7 @@ Panel {
         Toggle {
           width: parent.width
           label: "All screens together"
-          description: "Every screen switches desktop at once: the laptop's own on 1-10, the rest left to right on 11-20, 21-30."
+          description: "Every screen switches desktop at once. Workspaces come in blocks of ten a screen: 1-10 on the laptop, then 11-20, 21-30 on the others from left to right."
           checked: root.syncScreens
           foreground: root.bar.foreground
           fontFamily: root.bar.fontFamily
