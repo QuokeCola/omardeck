@@ -142,7 +142,9 @@ function read(text) {
   var body = text.slice(start, end).split("\n")
   for (var i = 0; i < body.length; i++) {
     var m = body[i].match(/^\s*o\.bind\(\s*"([^"]+)"\s*,\s*"([^"]+)"/)
-    if (!m) continue
+    // Only what the panel itself would write, so saving never copies
+    // anything else back into the Lua.
+    if (!m || !/^[A-Za-z0-9_: +]+$/.test(m[1])) continue
     for (var a = 0; a < ACTIONS.length; a++) {
       if (ACTIONS[a].description === m[2]) out[ACTIONS[a].id] = m[1]
     }

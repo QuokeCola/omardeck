@@ -108,7 +108,9 @@ Item {
       desktop; also reachable as hl.dsp.event("aerial,goto:<address>"). */
   function gotoWindow(address) {
     const key = String(address || "").replace(/^0x/, "")
-    if (key === "") return
+    // An address and nothing else: it goes into the Lua that Hyprland runs,
+    // and any client of its socket can send this event.
+    if (!/^[0-9a-fA-F]+$/.test(key)) return
     if (!service.open) {
       if (service.showing || service.scrub !== "") return
       service.deskSlide = true

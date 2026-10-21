@@ -414,8 +414,12 @@ Item {
     var e = root.entryFor(key)
     if (e) {
       Quickshell.execDetached(["uwsm-app", "--", "gtk-launch", String(e.id).replace(/\.desktop$/, "") + ".desktop"])
+    } else if (key.indexOf("class:") !== 0) {
+      Quickshell.execDetached(["uwsm-app", "--", key])
     } else {
-      Quickshell.execDetached(["uwsm-app", "--", key.replace(/^class:/, "")])
+      // A window class is whatever the app called itself: never something to
+      // run. The menu offers no "New Window" for one either.
+      return
     }
     root.launched(key)
   }

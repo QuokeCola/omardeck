@@ -430,8 +430,11 @@ Item {
     }
   }
 
+  // Only for testing: it can bring back what was cleared and write fake
+  // entries into the archive, which no other program should be able to ask.
   IpcHandler {
     target: "quokecola.omardeck.notifications.test"
+    enabled: Quickshell.env("OMARDECK_TEST") === "1"
 
     // Feed a fake trackpad swipe frame, as bin/edge-swipe would.
     function swipe(kind: string, progress: real, velocity: real): string {

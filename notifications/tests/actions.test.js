@@ -273,7 +273,7 @@ test("fixed image launcher preserves spaces, rejects unsafe paths and reports st
  const temp=fs.mkdtempSync(path.join(os.tmpdir(),"notification-image-open-"))
  t.after(()=>fs.rmSync(temp,{recursive:true,force:true}))
  const file=path.join(temp,"a picture.png"),marker=path.join(temp,"opened")
- fs.writeFileSync(file,"fixture")
+ fs.writeFileSync(file,Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==","base64"))
  for(const program of ["tensaku-edit","xdg-open"]) fs.writeFileSync(path.join(temp,program),'#!/bin/bash\nprintf "%s" "$1" > "$MARKER"\nexit "${OPEN_CODE:-0}"\n',{mode:0o755})
  const helper=path.join(__dirname,"../bin/open-notification-image")
  const run=(intent,image,extra={})=>spawnSync("/usr/bin/bash",[helper,intent,image],{env:{...process.env,PATH:temp+":"+process.env.PATH,MARKER:marker,...extra},encoding:"utf8",timeout:2000})
@@ -283,6 +283,9 @@ test("fixed image launcher preserves spaces, rejects unsafe paths and reports st
  }
  for(const invalid of ["-option.png","/tmp/a.png\n","/tmp/a.desktop","/tmp/a.svg","https://example.test/a.png"]) assert.equal(run("edit-screenshot",invalid).status,2)
  assert.equal(run("edit-screenshot",path.join(temp,"missing.png")).status,4)
+ // Named as an image, but not one: never handed to xdg-open.
+ const disguised=path.join(temp,"page.png");fs.writeFileSync(disguised,"<!doctype html><title>x</title>")
+ assert.equal(run("view-image",disguised).status,5)
  assert.equal(run("arbitrary-command",file).status,2)
  const unavailable=path.join(temp,"unavailable");fs.mkdirSync(unavailable)
  fs.symlinkSync("/usr/bin/jq",path.join(unavailable,"jq"))

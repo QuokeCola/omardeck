@@ -10,6 +10,13 @@ file=${2:-}
 jq -en --arg file "$file" '$file | test("\\A/[^\"\u0027\\x00-\\x1f\\x7f]*\\.(jpe?g|png|webp|gif)\\z"; "i")' >/dev/null || exit 2
 [[ -f $file && -r $file ]] || exit 4
 command -v "$program" >/dev/null || exit 127
+# xdg-open picks the app from what the file is, not what it is named: one
+# that only calls itself an image goes nowhere.
+mime=$(file -b --mime-type -- "$file")
+case $mime in
+  image/png | image/jpeg | image/webp | image/gif) ;;
+  *) exit 5 ;;
+esac
 
 # Detect immediate launch failures, then release the editor so the center
 # remains usable while its window stays open. Never inherit collector pipes.

@@ -442,7 +442,8 @@ prune() {
 
   local key
   while IFS= read -r key; do
-    [[ -n $key ]] || continue
+    # A key is made into paths below: only one the store would have made.
+    [[ $key =~ ^[0-9]+-[0-9]+$ ]] || continue
     rm -f -- "$images/$key-appIcon" "$images/$key-image" "$images/$key-preview" \
       "$images/$key-appIcon.png" "$images/$key-image.png" "$images/$key-preview.png"
     # The source file too. It was the service's copy of something this archive
