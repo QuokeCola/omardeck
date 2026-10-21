@@ -65,6 +65,23 @@ sudo udevadm control --reload && sudo udevadm trigger
 The rule grants the logged-in user access to the touchpad only. Without it,
 everything else works and the bell still opens the sheet.
 
+## Remove
+
+```sh
+omarchy plugin remove quokecola.omardeck
+hyprctl reload
+```
+
+Reloading Hyprland drops the gestures and layer rules Omardeck registered
+while it ran. A few things it may have written stay until you remove them:
+
+- the shortcuts section between `-- >>> aerial` and `-- <<< aerial` in
+  `~/.config/hypr/bindings.lua`, if you saved shortcuts in its settings;
+- the dock's settings, `~/.config/omarchy/dock.json`;
+- the notification archive, `~/.local/state/omarchy-notification-center`;
+- the touchpad rule, if you installed it:
+  `sudo rm /etc/udev/rules.d/70-omardeck-touchpad.rules`.
+
 ## Use
 
 - **Overview:** three fingers up to open, down to close, sideways to change
