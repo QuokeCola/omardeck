@@ -21,11 +21,14 @@ Scope {
   property var shell: null
   property var manifest: null
   property var service: null
+  // The shell injects this plugin's whole service here; the overview is one part of it.
+  onServiceChanged: if (root.service && root.service.overview) root.service = root.service.overview
 
   function findService() {
     if (root.service || !root.shell || typeof root.shell.serviceFor !== "function") return
     const found = root.shell.serviceFor(root.manifest ? root.manifest.id : "quokecola.omardeck")
-    root.service = found ? found.overview : null
+    // Looked up mid-construction, the service is there before its parts are.
+    root.service = found && found.overview ? found.overview : null
   }
 
   onShellChanged: root.findService()
