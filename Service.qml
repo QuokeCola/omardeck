@@ -5,6 +5,7 @@ import Quickshell.Hyprland
 import Quickshell.Wayland
 import Quickshell.Widgets
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // Bottom dock: pinned apps, then running apps that aren't pinned. Window state
@@ -598,9 +599,9 @@ Item {
               height: panel.snap(root.dockHeight)
               width: Math.max(0, row.width - panel.snap(root.spacing)) + panel.snap(root.sidePadding) * 2
               radius: Math.min(14, Style.cornerRadius)
-              color: Color.bar.background
+              color: Commons.Color.bar.background
               border.width: 1
-              border.color: Util.alpha(Color.bar.text, 0.12)
+              border.color: Util.alpha(Commons.Color.bar.text, 0.12)
             }
 
             Row {
@@ -663,7 +664,7 @@ Item {
                       anchors.centerIn: parent
                       width: 1
                       height: root.iconSize * 0.7
-                      color: Util.alpha(Color.bar.text, 0.2)
+                      color: Util.alpha(Commons.Color.bar.text, 0.2)
                     }
 
                     // Two rasters, both loaded once: one at exactly the resting
@@ -733,7 +734,7 @@ Item {
                           width: 4
                           height: 4
                           radius: 2
-                          color: cell.isActive ? Color.accent : Util.alpha(Color.bar.text, 0.6)
+                          color: cell.isActive ? Commons.Color.accent : Util.alpha(Commons.Color.bar.text, 0.6)
                         }
                       }
                     }
@@ -747,14 +748,14 @@ Item {
                       width: tipText.implicitWidth + 16
                       height: tipText.implicitHeight + 8
                       radius: Math.min(6, Style.cornerRadius)
-                      color: Color.tooltip.background
+                      color: Commons.Color.tooltip.background
                       border.width: 1
-                      border.color: Util.alpha(Color.tooltip.border, 0.3)
+                      border.color: Util.alpha(Commons.Color.tooltip.border, 0.3)
                       Text {
                         id: tipText
                         anchors.centerIn: parent
                         text: cell.isSep ? "" : root.nameFor(cell.key)
-                        color: Color.tooltip.text
+                        color: Commons.Color.tooltip.text
                         font.pixelSize: Style.font.body
                       }
                     }
@@ -859,8 +860,8 @@ Item {
             height: Math.round(col.implicitHeight + 2 * padding)
             padding: Math.round(Style.space(6))
             radius: Math.min(12, Style.cornerRadius)
-            color: Color.menu.background
-            borderSpec: Border.surfaceSpec("menu", "border", Color.menu.border, 1)
+            color: Commons.Color.menu.background
+            borderSpec: Border.surfaceSpec("menu", "border", Commons.Color.menu.border, 1)
 
             Column {
               id: col
@@ -893,7 +894,7 @@ Item {
                     spacing: 1
                     Text {
                       text: menu.key ? root.nameFor(menu.key) : ""
-                      color: Color.menu.text
+                      color: Commons.Color.menu.text
                       font.family: Style.font.menuFamily
                       font.pixelSize: Style.font.subtitle
                       font.weight: Font.DemiBold
@@ -901,7 +902,7 @@ Item {
                     Text {
                       text: menu.wins.length === 0 ? "Not running"
                           : menu.wins.length === 1 ? "1 window" : menu.wins.length + " windows"
-                      color: Util.alpha(Color.menu.text, 0.5)
+                      color: Util.alpha(Commons.Color.menu.text, 0.5)
                       font.family: Style.font.menuFamily
                       font.pixelSize: Style.font.bodySmall
                     }
@@ -957,7 +958,7 @@ Item {
       anchors.centerIn: parent
       width: parent.width - 12
       height: 1
-      color: Util.alpha(Color.menu.text, 0.1)
+      color: Util.alpha(Commons.Color.menu.text, 0.1)
     }
   }
 
@@ -972,12 +973,12 @@ Item {
     property bool danger: false
     signal triggered()
     readonly property bool hot: marea.containsMouse
-    readonly property color ink: danger ? Color.urgent : (hot ? Color.menu.selectedText : Color.menu.text)
+    readonly property color ink: danger ? Commons.Color.urgent : (hot ? Commons.Color.menu.selectedText : Commons.Color.menu.text)
     width: parent ? parent.width : 200
     implicitWidth: 36 + mlabel.implicitWidth + (badge ? mbadge.width + 16 : 12)
     height: visible ? 32 : 0
     radius: Math.min(8, Style.cornerRadius)
-    color: hot ? (danger ? Util.alpha(Color.urgent, 0.14) : Color.menu.selectedBackground) : "transparent"
+    color: hot ? (danger ? Util.alpha(Commons.Color.urgent, 0.14) : Commons.Color.menu.selectedBackground) : "transparent"
     Behavior on color { ColorAnimation { duration: 90 } }
 
     Item {
@@ -997,7 +998,7 @@ Item {
         anchors.centerIn: parent
         visible: mrow.glyph === ""
         width: 6; height: 6; radius: 3
-        color: mrow.current ? Color.accent : Util.alpha(Color.menu.text, 0.25)
+        color: mrow.current ? Commons.Color.accent : Util.alpha(Commons.Color.menu.text, 0.25)
       }
     }
     Text {
@@ -1021,12 +1022,12 @@ Item {
       width: Math.max(20, btext.implicitWidth + 10)
       height: 18
       radius: Math.min(5, Style.cornerRadius)
-      color: Util.alpha(Color.menu.text, mrow.hot ? 0.14 : 0.08)
+      color: Util.alpha(Commons.Color.menu.text, mrow.hot ? 0.14 : 0.08)
       Text {
         id: btext
         anchors.centerIn: parent
         text: mrow.badge
-        color: Util.alpha(Color.menu.text, 0.7)
+        color: Util.alpha(Commons.Color.menu.text, 0.7)
         font.family: Style.font.menuFamily
         font.pixelSize: Style.font.caption
       }
