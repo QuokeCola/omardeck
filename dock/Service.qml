@@ -214,8 +214,12 @@ Item {
 
   function iconFor(key) {
     var e = entryFor(key)
+    // An installed desktop entry may name an image file; a window class is
+    // chosen by the app itself, so only an icon-theme name is looked up from
+    // one, never a path for the shell's image decoder to open.
     var icon = e ? String(e.icon || "") : key.replace(/^class:/, "")
-    if (icon.charAt(0) === "/") return "file://" + icon
+    if (e && icon.charAt(0) === "/") return "file://" + icon
+    if (!/^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(icon)) return Quickshell.iconPath("application-x-executable", true)
     var p = Quickshell.iconPath(icon, true)
     if (!p) p = Quickshell.iconPath(icon.toLowerCase(), true)
     return p || Quickshell.iconPath("application-x-executable", true)
@@ -746,6 +750,7 @@ Item {
                         id: tipText
                         anchors.centerIn: parent
                         text: cell.isSep ? "" : root.nameFor(cell.key)
+                        textFormat: Text.PlainText
                         color: Commons.Color.tooltip.text
                         font.pixelSize: Style.font.body
                       }
@@ -885,6 +890,7 @@ Item {
                     spacing: 1
                     Text {
                       text: menu.key ? root.nameFor(menu.key) : ""
+                      textFormat: Text.PlainText
                       color: Commons.Color.menu.text
                       font.family: Style.font.menuFamily
                       font.pixelSize: Style.font.subtitle
@@ -893,6 +899,7 @@ Item {
                     Text {
                       text: menu.wins.length === 0 ? "Not running"
                           : menu.wins.length === 1 ? "1 window" : menu.wins.length + " windows"
+                      textFormat: Text.PlainText
                       color: Util.alpha(Commons.Color.menu.text, 0.5)
                       font.family: Style.font.menuFamily
                       font.pixelSize: Style.font.bodySmall
@@ -981,6 +988,7 @@ Item {
         anchors.centerIn: parent
         visible: mrow.glyph !== ""
         text: mrow.glyph
+        textFormat: Text.PlainText
         color: mrow.ink
         font.family: Style.fontFamily
         font.pixelSize: Style.font.heading
@@ -999,6 +1007,7 @@ Item {
       width: parent.width - x - (mrow.badge ? mbadge.width + 16 : 10)
       elide: Text.ElideRight
       text: mrow.label
+      textFormat: Text.PlainText
       color: mrow.ink
       font.family: Style.font.menuFamily
       font.pixelSize: Style.font.body
@@ -1018,6 +1027,7 @@ Item {
         id: btext
         anchors.centerIn: parent
         text: mrow.badge
+        textFormat: Text.PlainText
         color: Util.alpha(Commons.Color.menu.text, 0.7)
         font.family: Style.font.menuFamily
         font.pixelSize: Style.font.caption
