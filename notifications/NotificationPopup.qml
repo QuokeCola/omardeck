@@ -83,7 +83,10 @@ PanelWindow {
     slideSpring.stop()
     slideCurve.stop()
     slideAway.stop()
-    if (!slideIn || popoutSwitching || popoutSwitchClosing) { slideProgress = slideTarget; return }
+    // A fading panel swaps instantly when another bar icon takes over; a
+    // sliding one always slides, so the one leaving goes back where it came
+    // from while the next comes in.
+    if (!slideIn) { slideProgress = slideTarget; return }
     slideCurve.to = slideTarget
     slideCurve.duration = open ? 320 : 220
     slideCurve.start()
