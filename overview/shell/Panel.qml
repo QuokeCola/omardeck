@@ -5,6 +5,7 @@ import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
 import "../app/Shortcuts.js" as Shortcuts
+import "../../notifications" as Notifications
 
 // Aerial's settings, from a button on the bar.
 //
@@ -220,12 +221,17 @@ Panel {
 
   // ------------------------------------------------------------------ panel
 
-  KeyboardPanel {
+  // The notification center's popup, dropping out of the bar the way its
+  // sheet slides in from the edge, and see-through with frosted glass on.
+  Notifications.NotificationPopup {
     id: panel
     anchorItem: button
     owner: root
     bar: root.bar
     open: root.opened
+    slideIn: true
+    slideFrom: "top"
+    surfaceColor: Qt.alpha(Commons.Color.popups.background, root.frost ? 0.72 : 1)
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(400))
     contentHeight: panel.fittedContentHeight(column.implicitHeight)
@@ -323,7 +329,7 @@ Panel {
         Toggle {
           width: parent.width
           label: "Frosted glass"
-          description: "Blur behind see-through windows, the way Hyprland does. Uses more GPU."
+          description: "Blur behind see-through windows, the way Hyprland does, and behind this panel and the notification sheet. Uses more GPU."
           checked: root.frost
           foreground: root.bar.foreground
           fontFamily: root.bar.fontFamily

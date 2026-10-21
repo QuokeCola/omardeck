@@ -215,6 +215,11 @@ end
 -- file runs again.
 if not _G.__aerial_layer then
   hl.layer_rule({ match = { namespace = "^omarchy-aerial$" }, no_anim = true, animation = "none" })
+  -- The overview's settings and the notification center animate themselves
+  -- too, and are frosted: blurred behind wherever they are see-through, which
+  -- they are only with frosted glass on.
+  hl.layer_rule({ match = { namespace = "^omardeck-panel$" }, no_anim = true, animation = "none",
+                  blur = true, ignore_alpha = 0.2 })
   _G.__aerial_layer = true
 end
 

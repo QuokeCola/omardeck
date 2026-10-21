@@ -694,9 +694,10 @@ Panel {
     cornerRadius: 0
     slideIn: true
     borderSpec: Border.flat(Qt.alpha(Commons.Color.popups.text, 0.15), 1)
-    // Translucent, so the compositor's blur on omarchy-keyboard-panel shows
-    // through; cards stay opaque on top of it.
-    surfaceColor: Qt.alpha(Commons.Color.popups.background, 0.72)
+    // With frosted glass on (the overview's setting, shared with this
+    // panel), translucent so the compositor's blur shows through; cards stay
+    // opaque on top of it.
+    surfaceColor: Qt.alpha(Commons.Color.popups.background, root.setting("frost", true) !== false ? 0.72 : 1)
     contentWidth: popup.fittedContentWidth(Style.space(root.panelWidth))
     // A column down the whole side of the screen, from under the bar to the
     // bottom, whatever it holds. A listHeight setting still opts back into a

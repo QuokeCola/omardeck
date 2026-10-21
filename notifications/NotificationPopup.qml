@@ -59,8 +59,11 @@ PanelWindow {
   property bool popoutSwitchClosing: false
   property bool focusPrimed: false
 
-  // Slide the card in from the right screen edge instead of fading it.
+  // Slide the card in instead of fading it: from the right screen edge, or,
+  // with slideFrom "top" under a top bar, down out of the bar.
   property bool slideIn: false
+  property string slideFrom: "right"
+  readonly property bool fromTop: slideIn && slideFrom === "top" && barPos === "top"
   // 0 is off the screen edge, 1 in place. Past 1 the sheet is being pulled
   // further out than it rests (a trackpad overswipe), drawn as a stretch.
   // Driven imperatively rather than bound to `open`, so a trackpad swipe can
@@ -189,7 +192,9 @@ PanelWindow {
   color: "transparent"
   exclusionMode: ExclusionMode.Ignore
 
-  WlrLayershell.namespace: "omarchy-keyboard-panel"
+  // A namespace of its own, for the blur and no-fade rules the plugin
+  // registers (see overview/app/gesture.lua).
+  WlrLayershell.namespace: "omardeck-panel"
   WlrLayershell.layer: WlrLayer.Overlay
   // Keyboard focus follows `open` (NOT `visible`). The window remains
   // mapped during the fade-out so the opacity animation has something to
@@ -219,21 +224,26 @@ PanelWindow {
   // strip down the right edge the sheet can reach, overswipe stretch
   // included. Its input region is the card; everything else on the screen
   // falls through to `dismissSurface` below it, which does the dismissing.
+  // Dropping from the bar, the surface instead starts at the bar's lower
+  // edge and ends where the card does, so the card comes out from under it.
   anchors {
     top: true
-    bottom: true
-    left: !slideIn
+    bottom: !fromTop
+    left: !slideIn || fromTop
     right: true
   }
-  implicitWidth: slideIn ? stripWidth : screenW
+  margins.top: fromTop ? surfaceY : 0
+  implicitWidth: slideIn && !fromTop ? stripWidth : screenW
+  implicitHeight: fromTop ? Math.max(1, Math.ceil(cardOrigin.y + contentHeight - surfaceY) + 1) : screenH
 
   // The furthest a sheet is ever drawn past its resting place, with room to
   // spare: the rubber band stops short of 1.14, and the spring overshoots
   // by under 0.05.
   readonly property real maxShownProgress: 1.2
   readonly property int stripWidth: Math.min(screenW, Math.ceil((maxShownProgress - 1) * (screenW - cardOrigin.x) + (screenW - cardOrigin.x)) + 1)
-  // Where this surface's left edge is on the screen.
-  readonly property real surfaceX: slideIn ? screenW - stripWidth : 0
+  // Where this surface's left and top edges are on the screen.
+  readonly property real surfaceX: slideIn && !fromTop ? screenW - stripWidth : 0
+  readonly property real surfaceY: fromTop ? barH : 0
 
   // Clickable region is the whole screen. Clicks in the bar strip are
   // forwarded to registered bar buttons so switching between panel icons
@@ -245,9 +255,9 @@ PanelWindow {
   }
   mask: Region {
     x: root.slideIn ? Math.floor(card.x + cardShift.x) : 0
-    y: root.slideIn ? card.y : 0
+    y: root.slideIn ? Math.floor(card.y + cardShift.y) : 0
     width: root.slideIn ? Math.ceil(card.width) + 1 : root.screenW
-    height: root.slideIn ? card.height : root.screenH
+    height: root.slideIn ? Math.ceil(card.height) + 1 : root.screenH
   }
 
   // Track every layout change between the bar's contentItem and the
@@ -548,11 +558,11 @@ PanelWindow {
   BorderSurface {
     id: card
     x: root.cardOrigin.x - root.surfaceX
-    y: root.cardOrigin.y
+    y: root.cardOrigin.y - root.surfaceY
     // An overswipe stretches the sheet leftward instead of lifting it off the
     // screen edge: the card grows by the overshoot and the content keeps its
     // width, pinned to the leading edge.
-    readonly property real stretch: root.slideIn ? Math.max(0, root.shownProgress - 1) * (root.screenW - root.cardOrigin.x) : 0
+    readonly property real stretch: root.slideIn && !root.fromTop ? Math.max(0, root.shownProgress - 1) * (root.screenW - root.cardOrigin.x) : 0
     width: root.contentWidth + stretch
     height: root.contentHeight
     color: root.surfaceColor
@@ -562,7 +572,9 @@ PanelWindow {
     opacity: root.slideIn || root.open || root.popoutSwitching ? 1.0 : 0
     transform: Translate {
       id: cardShift
-      x: root.slideIn ? (1 - Math.min(1, root.shownProgress)) * (root.screenW - root.cardOrigin.x) - card.stretch : 0
+      x: root.slideIn && !root.fromTop ? (1 - Math.min(1, root.shownProgress)) * (root.screenW - root.cardOrigin.x) - card.stretch : 0
+      // Up under the bar, all of it, when shut.
+      y: root.fromTop ? -(1 - Math.min(1, root.shownProgress)) * (card.y + card.height) : 0
     }
 
     Behavior on opacity {
