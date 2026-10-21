@@ -1,11 +1,15 @@
 # Omardeck
 
 A window overview, a dock and a notification center for
-[Omarchy](https://omarchy.org), made to move together.
+[Omarchy](https://omarchy.org), made to move together. The overview is
+[Aerial](https://github.com/ReidenXerx/omarchy-aerial) by ReidenXerx and the
+notification center is
+[Foamy Notification Center](https://github.com/foamrider/foamy-notification-center)
+by foamrider, both extended here, joined by a dock of my own.
 
 ![The overview, open on a desktop with three windows, the desktops along the top and the dock below](docs/overview.webp)
 
-- **Overview.** Swipe up with three fingers and every window on the desktop
+- **Overview** (based on Aerial). Swipe up with three fingers and every window on the desktop
   spreads out, live, with your desktops along the top. Swipe sideways to
   slide between desktops, on the bare desktop too. Drop a window on another
   desktop to send it there.
@@ -13,7 +17,7 @@ A window overview, a dock and a notification center for
   only while a window actually covers it. Click an app with several windows
   and the overview opens on just those; click one whose window is on another
   desktop and the overview slides you there.
-- **Notification center.** A sheet that slides in from the right edge, with
+- **Notification center** (based on Foamy). A sheet that slides in from the right edge, with
   notifications stacked by app, search, history and do not disturb. Swipe in
   with two fingers from the edge of the touchpad to open it.
 
@@ -28,10 +32,8 @@ dock, and the panels hand over to each other with a slide. With **Frosted
 glass** on, the overview's see-through windows, its settings panel and the
 notification sheet are all blurred like Hyprland's own windows.
 
-Omardeck builds on two projects, with thanks to their authors:
-[Aerial](https://github.com/ReidenXerx/omarchy-aerial) by ReidenXerx and
-[Foamy Notification Center](https://github.com/foamrider/foamy-notification-center)
-by foamrider. See [Credits](#credits).
+Thanks to ReidenXerx and foamrider for the projects this builds on; see
+[Credits](#credits).
 
 ## Install
 
