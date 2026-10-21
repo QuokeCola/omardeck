@@ -271,6 +271,28 @@ PanelWindow {
   // scope; clear the text and it narrows back to where you are.
   readonly property bool searching: !overlay.everything && (overlay.filter !== "" || overlay.appOnly !== "")
 
+  // Opened on one app, the other windows of this desktop fade out on a clock
+  // of their own. Tied to `t`, they were gone within a frame or two: the
+  // spring that opens the overview covers most of the way at once. Closing
+  // still brings them back with `t`, which already reads well, so the veil
+  // stays up until the app is let go.
+  property real appVeil: 0
+  readonly property bool appOpening: overlay.appOnly !== "" && overlay.service !== null && overlay.service.goal > 0
+  onAppOpeningChanged: if (surface.appOpening) appVeilIn.restart()
+  readonly property bool appCleared: overlay.appOnly === ""
+  onAppClearedChanged: if (surface.appCleared) {
+    appVeilIn.stop()
+    surface.appVeil = 0
+  }
+  NumberAnimation {
+    id: appVeilIn
+    target: surface
+    property: "appVeil"
+    to: 1
+    duration: 260
+    easing.type: Easing.OutCubic
+  }
+
   readonly property var windows: {
     if (overlay.everything || surface.searching) return surface.monitorWindows
     const out = []
@@ -1230,7 +1252,7 @@ PanelWindow {
              : (card.picked && overlay.active ? 1.035 : 1)
         opacity: card.flying ? overlay.veil
                : card.shown ? (card.dragging ? 0.94 : 1)
-               : card.fading ? Math.max(0, 1 - card.along * 2.5) : 0
+               : card.fading ? Math.max(1 - surface.appVeil, 1 - card.along * 2.5) : 0
         visible: card.opacity > 0.01
         // Not as it takes off: the card swaps its shrink for its size in the
         // same frame, and animating one of them would show the seam.
