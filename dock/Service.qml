@@ -33,6 +33,8 @@ Item {
   visible: false
 
   property var shell: null
+  // The window overview, handed in by the plugin; null without one.
+  property var overview: null
 
   // ------------------------------------------------------------------ config
   readonly property string configPath: Quickshell.env("HOME") + "/.config/omarchy/dock.json"
@@ -152,10 +154,7 @@ Item {
   // fullscreen window) and once shortly after start.
   property bool remapping: false
   function restack() { root.remapping = true; remapTimer.restart() }
-  // Also the moment to re-announce the dock's size: Aerial may just have
-  // started and missed it.
-  signal restackDone()
-  Timer { id: remapTimer; interval: 50; onTriggered: { root.remapping = false; root.restackDone() } }
+  Timer { id: remapTimer; interval: 50; onTriggered: root.remapping = false }
   Timer { interval: 2000; running: true; onTriggered: root.restack() }
 
   Connections {
@@ -163,10 +162,6 @@ Item {
     function onRawEvent(event) {
       var n = event.name
       if (n === "openlayer" && String(event.data).trim() === "omarchy-aerial") root.restack()
-      else if (n === "custom" && String(event.data).indexOf("aerial-state,") === 0) {
-        // Aerial took the jump (or finished one): no fallback needed.
-        if (root.jumpPending) { root.jumpPending = ""; jumpFallback.stop() }
-      }
       else if (root.refreshEvents.indexOf(n) >= 0) root.refresh()
     }
   }
@@ -394,6 +389,15 @@ Item {
     return w
   }
 
+  // How much of each screen's bottom edge the dock covers, by monitor name.
+  property var covers: ({})
+  function setCover(monitor, px) {
+    if (root.covers[monitor] === px) return
+    var next = Object.assign({}, root.covers)
+    next[monitor] = px
+    root.covers = next
+  }
+
   // ---------------------------------------------------------------- actions
   // Over the shell's own socket connection: no hyprctl process per click.
   function hypr(lua) { Hyprland.dispatch(lua) }
@@ -417,8 +421,8 @@ Item {
     if (!wins.length) { root.launch(key); return }
     // Several windows: let Aerial lay them out to pick from; choosing one
     // takes you to its desktop the way the overview always does.
-    if (wins.length > 1 && root.windowPicker === "aerial") {
-      Hyprland.dispatch('hl.dsp.event("aerial,app:' + String(wins[0].class).replace(/[^A-Za-z0-9._-]/g, "") + '")')
+    if (wins.length > 1 && root.windowPicker === "aerial" && root.overview) {
+      root.overview.showApp(String(wins[0].class))
       return
     }
     var idx = -1
@@ -432,22 +436,16 @@ Item {
     root.focusWindow(stable[(at + 1) % stable.length].address)
   }
 
-  // Off on another desktop: ask Aerial to slide there. If it doesn't start
-  // sliding promptly (not installed, or busy), just switch.
-  property string jumpPending: ""
+  // Off on another desktop: the overview slides there. Mid-swipe or
+  // half open it can't, and the window is focused straight away instead.
   function goToWindow(win) {
     var mon = null
     for (var m = 0; m < root.monitors.length; m++) if (root.monitors[m].id === win.monitor) mon = root.monitors[m]
     var here = mon && mon.activeWorkspace && mon.activeWorkspace.id === win.workspace.id
-    if (!root.slideToWindow || here || win.workspace.id <= 0) { root.focusWindow(win.address); return }
-    root.jumpPending = win.address
-    jumpFallback.restart()
-    Hyprland.dispatch('hl.dsp.event("aerial,goto:' + String(win.address).replace(/^0x/, "") + '")')
-  }
-  Timer {
-    id: jumpFallback
-    interval: 400
-    onTriggered: if (root.jumpPending) { root.focusWindow(root.jumpPending); root.jumpPending = "" }
+    var ov = root.overview
+    var canSlide = ov && !(!ov.open && (ov.showing || ov.scrub !== ""))
+    if (!root.slideToWindow || here || win.workspace.id <= 0 || !canSlide) { root.focusWindow(win.address); return }
+    ov.gotoWindow(win.address)
   }
 
   function quit(key) {
@@ -510,19 +508,12 @@ Item {
 
         onHoveredChanged: if (!hovered) { lingering = true; lingerTimer.restart() }
 
-        // Tell other shell plugins how much of this screen's bottom edge the
-        // dock covers (0 when hidden), on Hyprland's event socket:
-        // custom>>dock-state,<monitor>,<px>. Aerial lifts its desktop dots
-        // above it.
+        // How much of this screen's bottom edge the dock covers (0 when
+        // hidden), in `covers` by monitor: the overview lifts its desktop
+        // dots above it.
         readonly property int covers: revealed && visible ? Math.ceil(root.edgeGap + root.dockHeight) : 0
-        function announce() {
-          Hyprland.dispatch('hl.dsp.event("dock-state,' + modelData.name + ',' + panel.covers + '")')
-        }
-        onCoversChanged: announce()
-        Connections {
-          target: root
-          function onRestackDone() { panel.announce() }
-        }
+        onCoversChanged: root.setCover(modelData.name, panel.covers)
+        Component.onCompleted: root.setCover(modelData.name, panel.covers)
         Timer { id: lingerTimer; interval: 350; onTriggered: panel.lingering = false }
 
         // Over a fullscreen window, unmap once slid away: any surface above

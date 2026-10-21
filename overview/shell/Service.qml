@@ -34,17 +34,24 @@ Item {
   // this is the plugin's to do rather than Hyprland's.
   property bool deskSlide: false
 
-  // How much of each screen's bottom edge a dock covers, by monitor name, as
-  // announced on the event socket (custom>>dock-state,<monitor>,<px>), so
-  // the desktop dots can sit above it.
+  // How much of each screen's bottom edge the dock covers, by monitor name,
+  // so the desktop dots can sit above it. Bound to the dock by the plugin.
   property var dockCovers: ({})
+
+  // How far up the fingers have pulled the closed overview, 0 to 1, or -1
+  // when no such swipe is under way; and, as they lift, which way it is
+  // headed. For whatever has to make way for it: the notification sheet
+  // slides aside under the same fingers.
+  property real upFingers: -1
+  signal landing(bool opening)
 
   // One app's windows only, from every desktop, when the overview was opened
   // for an app (the dock does, on an icon with several windows). Its app id,
   // lower-cased; "" for the ordinary overview.
   property string appOnly: ""
 
-  /** Open on one app's windows, from hl.dsp.event("aerial,app:<appId>"). */
+  /** Open on one app's windows: called by the dock, and reachable as
+      hl.dsp.event("aerial,app:<appId>"). */
   function showApp(appId) {
     const id = String(appId || "").toLowerCase()
     if (id === "" || service.scrub !== "") return
@@ -97,8 +104,8 @@ Item {
   // Slide to the desktop a window is on, however far, and focus it there.
   signal jumpRequested(string address)
 
-  /** From hl.dsp.event("aerial,goto:<address>") — the dock sends it when you
-      click an app whose one window is on another desktop. */
+  /** Called by the dock when you click an app whose one window is on another
+      desktop; also reachable as hl.dsp.event("aerial,goto:<address>"). */
   function gotoWindow(address) {
     const key = String(address || "").replace(/^0x/, "")
     if (key === "") return
@@ -337,17 +344,15 @@ Item {
     findWallpaper.running = true
   }
 
-  // Said on Hyprland's event socket whenever it changes, for other plugins —
-  // which cannot reach this service — to make way for the overview: the
-  // notification center slides its sheet aside, for one. A handful of events
-  // a swipe; the swipe's own progress is already out there as aerial,up-move.
+  // Where the overview is, for the parts that make way for it.
   readonly property string announced: service.open ? "open"
                                     : service.t > 0.001 ? "showing"
                                     : service.deskSlide ? "sliding" : "hidden"
-  onAnnouncedChanged: Hyprland.dispatch('hl.dsp.event("aerial-state,' + service.announced + '")')
 
   onShowingChanged: {
     if (service.showing) return
+    // Put away however it went, lift heard or not.
+    service.upFingers = -1
     service.findTheWallpaper()
     // Reset once it is fully away, not while it is still closing, or the
     // spread rearranges itself on the way out.
@@ -635,6 +640,7 @@ Item {
         // Already open: swiping up again is only the stretch, and springs
         // back. Nothing is re-read, so nothing on screen is rebuilt.
       } else if (opening) {
+        service.upFingers = 0
         service.everything = wantsEverything
         service.aim()
         service.arming()
@@ -665,6 +671,7 @@ Item {
                   : value <= 1 ? from + (1 - from) * value
                   : 1 + (value - 1)
         service.goal = service.rubber(raw)
+        if (service.upFingers >= 0) service.upFingers = Math.min(1, value)
       } else {
         service.goal = service.scrubFrom * (1 - Math.min(1, value))
       }
@@ -692,6 +699,10 @@ Item {
         // Spring running before the fingers are let go of, so nothing ever
         // sees a frame where neither is moving the overview.
         service.glideTo(wantOpen, speed, carry)
+        if (service.upFingers >= 0) {
+          service.upFingers = -1
+          service.landing(wantOpen)
+        }
       }
       service.scrub = ""
       break
@@ -715,6 +726,10 @@ Item {
       const wasMostlyOpen = service.goal > 0.5
       service.scrub = ""
       service.glideTo(wasMostlyOpen, 0)
+      if (service.upFingers >= 0) {
+        service.upFingers = -1
+        service.landing(wasMostlyOpen)
+      }
     }
   }
 
@@ -758,13 +773,6 @@ Item {
       }
       if (name === "custom" && data.startsWith("aerial,")) {
         service.onGesture(data.slice(7))
-        return
-      }
-      if (name === "custom" && data.startsWith("dock-state,")) {
-        const parts = data.split(",")
-        const next = Object.assign({}, service.dockCovers)
-        next[parts[1]] = Math.max(0, Number(parts[2]) || 0)
-        service.dockCovers = next
         return
       }
 

@@ -6,7 +6,10 @@ import "dock" as Dock
 // The one service the shell mounts for this plugin, holding the three parts.
 //
 // Each part keeps the service it had as a plugin of its own; the bar widget
-// and the overlay reach them through this one by name.
+// and the overlay reach them through this one by name. The parts are handed
+// each other here: the dock asks the overview for an app's windows or to
+// slide to one, the overview keeps its desktop dots above the dock, and the
+// notification sheet makes way for the overview.
 Item {
   id: root
   width: 0
@@ -27,6 +30,7 @@ Item {
     id: overview
     shell: root.shell
     manifest: root.manifest
+    dockCovers: dock.covers
   }
 
   Notifications.Service {
@@ -36,10 +40,12 @@ Item {
     pluginRegistry: root.pluginRegistry
     barWidgetRegistry: root.barWidgetRegistry
     omarchyPath: root.omarchyPath
+    overview: root.overview
   }
 
   Dock.Service {
     id: dock
     shell: root.shell
+    overview: root.overview
   }
 }
