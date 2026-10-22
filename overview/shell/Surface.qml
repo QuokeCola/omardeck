@@ -1097,7 +1097,10 @@ PanelWindow {
         // Opened on one app: the other windows of the desktop you are on fade
         // out where they stand as the overview opens (and back in if it closes
         // onto this desktop), rather than vanishing the moment it starts.
-        readonly property bool fading: !card.shown && overlay.appOnly !== ""
+        // Likewise the ones a search left out: closing onto their desktop,
+        // they fade back in with `t` rather than popping in whole once the
+        // overview has gone.
+        readonly property bool fading: !card.shown && surface.searching
                                        && overlay.wsOf(card.modelData) === surface.shownWorkspace
         readonly property bool hovered: hover.hovered && overlay.active
         readonly property bool picked: card.hovered || overlay.selectedKey === card.modelData.key
@@ -1358,7 +1361,7 @@ PanelWindow {
         opacity: card.handedOver || card.awaited ? 0
                : card.flying ? overlay.veil
                : card.shown ? (card.dragging ? 0.94 : 1)
-               : card.fading ? Math.max(1 - surface.appVeil, 1 - card.along * 2.5) : 0
+               : card.fading ? Math.max(overlay.appOnly !== "" ? 1 - surface.appVeil : 0, 1 - card.along * 2.5) : 0
         visible: card.opacity > 0.01
         // Not as it takes off: the card swaps its shrink for its size in the
         // same frame, and animating one of them would show the seam.
@@ -1369,8 +1372,9 @@ PanelWindow {
         // it stood, it showed the window back on its old desktop for a moment.
         // Nor one fading with the overview: that follows `t` every frame, and a
         // Behavior restarted every frame never leaves where it started — the
-        // window popped in whole once the overview had gone.
-        Behavior on opacity { enabled: !surface.sliding && !card.parked && !card.fading && !card.awaited && !card.tookOver; NumberAnimation { duration: 150 } }
+        // window popped in whole once the overview had gone. Held open, though,
+        // a card the search has just left out still eases away.
+        Behavior on opacity { enabled: !surface.sliding && !card.parked && (!card.fading || overlay.still) && !card.awaited && !card.tookOver; NumberAnimation { duration: 150 } }
 
         // Hyprland's rounding on the desktop, the overview's own once spread,
         // never rounder than Hyprland's.
