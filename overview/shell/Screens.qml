@@ -48,7 +48,79 @@ Item {
 
   function soon() { if (screens.enabled) settle.restart() }
 
-  onEnabledChanged: screens.soon()
+  onEnabledChanged: {
+    screens.soon()
+    if (screens.enabled) screens.bindKeys()
+    else if (screens.bound) {
+      // Back to whatever the config binds to the number keys.
+      screens.bound = false
+      unbinder.running = true
+    }
+  }
+
+  // ------------------------------------------------------- the number keys
+
+  // SUPER + number switches every screen to that desktop (see app/synced.lua),
+  // loaded into Hyprland's Lua while the setting is on.
+  readonly property string keysFile: {
+    const url = Qt.resolvedUrl("../app/synced.lua").toString()
+    return url.startsWith("file://") ? url.slice(7) : url
+  }
+  property bool bound: false
+  property bool bindAgain: false
+  property int checksLeft: 0
+
+  function bindKeys() {
+    if (!screens.enabled) return
+    if (binder.running) { screens.bindAgain = true; return }
+    const path = screens.keysFile.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+    binder.command = ["/usr/bin/hyprctl", "eval", 'dofile("' + path + '")']
+    binder.running = true
+  }
+
+  Process {
+    id: binder
+    onExited: (code) => {
+      if (code === 0) screens.bound = true
+      if (screens.bindAgain) {
+        screens.bindAgain = false
+        screens.bindKeys()
+        return
+      }
+      // A reload can land after this without its event reaching us (a
+      // monitor daemon at login): look a few times whether they are still
+      // there, as the gestures do.
+      screens.checksLeft = 5
+      keysCheck.restart()
+    }
+  }
+
+  Timer {
+    id: keysCheck
+    interval: 2000
+    onTriggered: if (screens.enabled && !binder.running && !keysProbe.running) keysProbe.running = true
+  }
+
+  Process {
+    id: keysProbe
+    command: ["/usr/bin/hyprctl", "eval", 'if not _G.__omardeck_synced then error("omardeck: keys gone") end']
+    onExited: (code) => {
+      if (code !== 0) screens.bindKeys()
+      else if (--screens.checksLeft > 0) keysCheck.restart()
+    }
+  }
+
+  // A reload forgets them; after one has settled, bind them again.
+  Timer {
+    id: rebind
+    interval: 600
+    onTriggered: screens.bindKeys()
+  }
+
+  Process {
+    id: unbinder
+    command: ["/usr/bin/hyprctl", "reload"]
+  }
 
   Connections {
     target: Hyprland
@@ -58,6 +130,7 @@ Item {
           || name === "monitorremoved" || name === "monitorremovedv2"
           || name === "configreloaded")
         screens.soon()
+      if (name === "configreloaded" && screens.enabled) rebind.restart()
     }
   }
 
