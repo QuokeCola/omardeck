@@ -220,7 +220,7 @@ Item {
   function run(order, moves) {
     const laptop = order[0]
     const shown = laptop.activeWorkspace && laptop.activeWorkspace.id > 0 ? laptop.activeWorkspace.id : 1
-    const desk = (shown - 1) % 10 + 1
+    const desk = Number.isInteger(shown) ? (shown - 1) % 10 + 1 : 1
     const lagging = order.some((m, i) => !m.activeWorkspace || m.activeWorkspace.id !== desk + 10 * i)
     if (!lagging && moves.length === 0) return
 
@@ -236,7 +236,7 @@ Item {
       if (!/^[A-Za-z0-9_-]+$/.test(m.name)) return
       lua += "hl.dispatch(hl.dsp.focus({ monitor = '" + m.name + "' })); "
       for (const ws in into) {
-        if (Math.floor((ws - 1) / 10) !== i) continue
+        if (!/^[0-9]+$/.test(ws) || Math.floor((ws - 1) / 10) !== i) continue
         lua += "hl.dispatch(hl.dsp.focus({ workspace = '" + ws + "', on_current_monitor = true })); "
         // Moving a window hands focus back to the screen it left.
         for (const key of into[ws])
