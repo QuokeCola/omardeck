@@ -1124,8 +1124,22 @@ Scope {
   // is showing before it closes, so it closes onto what the screen will
   // actually show: that desktop's windows fly home, not the ones of the
   // desktop it was opened on.
+  // The exclusive layer restores its previous focus when it closes. Apply
+  // the chosen window again after the surface has relinquished that grab.
+  property string pendingFocus: ""
+  Timer {
+    interval: 50
+    running: root.pendingFocus !== "" && !root.opened
+    onTriggered: {
+      const address = root.pendingFocus
+      root.pendingFocus = ""
+      Hyprland.dispatch('hl.dsp.focus({ window = "address:0x' + address + '" })')
+    }
+  }
+
   function focusWindow(address) {
     if (!address) return
+    root.pendingFocus = address
     const win = root.shot.find(w => w.key === address)
     if (win) root.stageId = root.wsOf(win)
     root.peek = -1
