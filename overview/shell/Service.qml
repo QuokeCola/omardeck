@@ -513,6 +513,9 @@ Item {
   // settings panel.
   property bool syncScreens: false
 
+  // Which keeps every screen one desktop as screens come and go.
+  Screens { enabled: service.syncScreens }
+
   // ---------------------------------------------------------- recording keys
 
   // The settings panel is listening for a shortcut: Hyprland's bindings are

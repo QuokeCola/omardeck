@@ -100,8 +100,17 @@ while it ran. A few things it may have written stay until you remove them:
 With this on, every screen switches desktop at once, and workspaces are
 numbered in blocks of ten a screen: 1–10 on the laptop, 11–20 on the next
 screen to the right, 21–30 on the one after. Desktop 3 is workspace 3 on the
-laptop and 13 and 23 on the others. Number keys that switch every screen at
-once have to be bound the same way in your Hyprland config.
+laptop and 13 and 23 on the others.
+
+Screens coming and going keep to that. Unplug one and its windows fold into
+the same desktop on a screen that is left (13 on the laptop becomes 3);
+plug it back in and the windows folded away from it go back, unless you have
+moved them since. Every screen is put on the desktop the laptop shows. This
+runs in the shell, so it survives the config reload a monitor profile does on
+resume; what was folded is forgotten when the shell restarts.
+
+Number keys that switch every screen at once have to be bound the same way in
+your Hyprland config.
 
 ### The dock
 
