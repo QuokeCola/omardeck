@@ -3,7 +3,7 @@
 A window overview, a dock and a notification center for
 [Omarchy](https://omarchy.org), made to move together.
 
-![The overview, open on a desktop with three windows, the desktops along the top and the dock below](docs/overview.webp)
+![Swiping the overview up, sliding to the next desktop and back, then pulling in the notification center and unfolding a stack](docs/tour.gif)
 
 - **Overview**, from [Aerial](https://github.com/ReidenXerx/omarchy-aerial)
   by ReidenXerx. Swipe up with three fingers and every window on the desktop
