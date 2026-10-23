@@ -13,7 +13,7 @@ import qs.Ui
 // geometry is known and the dock can hide only when a window actually overlaps it.
 //
 // Config: ~/.config/omarchy/dock.json (watched; the dock rewrites `pinned`
-// when you pin/unpin from the right-click menu).
+// when you pin/unpin from the right-click menu or by dragging an icon).
 //   pinned    desktop ids, without ".desktop"
 //   iconSize  px at rest
 //   height    panel height in px (independent of iconSize)
@@ -365,13 +365,46 @@ Item {
     for (var x = 0; x < extra.length; x++) next.push({ key: extra[x], separator: false })
 
     // Only swap the model when the set changes, so delegates (and their hover
-    // and animation state) survive ordinary window events.
+    // and animation state) survive ordinary window events. Mid-drag the cells
+    // are the dragger's to rearrange; the order catches up on the drop.
     var sig = next.map(function(it) { return it.key }).join("|")
-    if (sig !== root.itemsSig) {
+    if (sig !== root.itemsSig && !root.dragKey) {
       root.itemsSig = sig
       root.items = next
       root.syncCells(next)
     }
+  }
+
+  // ------------------------------------------------------------------ drag
+  // An icon being dragged, while it is (one panel drags at a time).
+  property string dragKey: ""
+
+  // Take the dragged-into order from the cells: what's left of the divider
+  // is pinned, what's right of it is the running apps' order. `removed` is a
+  // pinned icon dropped off the dock.
+  function commitOrder(key, removed) {
+    var before = [], after = [], seen = false
+    for (var i = 0; i < cells.count; i++) {
+      var c = cells.get(i)
+      if (c.leaving) continue
+      if (c.separator) seen = true
+      else (seen ? after : before).push(c.key)
+    }
+    // No divider: everything is pinned, or nothing is.
+    if (!seen && !root.pinned.length) { after = before; before = [] }
+    if (removed) before = before.filter(function(k) { return k !== key })
+    var pins = before.filter(function(k) { return k.indexOf("class:") !== 0 })
+    root.runningOrder = after.concat(root.runningOrder.filter(function(k) { return after.indexOf(k) < 0 }))
+    root.dragKey = ""
+    if (pins.join("|") !== root.pinned.join("|")) root.setPinned(pins)
+    else root.rebuild()
+  }
+
+  // A drag cut short: put the cells back where the apps belong.
+  function revertOrder() {
+    root.dragKey = ""
+    root.itemsSig = ""
+    root.rebuild()
   }
 
   // Centres of each item in the un-magnified layout, used to drive the
@@ -512,7 +545,7 @@ Item {
         property bool lingering: false
         property string menuKey: ""
         readonly property bool wantHidden: root.autohide === "always" || (root.autohide === "smart" && overlapped)
-        readonly property bool revealed: !wantHidden || hovered || lingering || menuKey !== ""
+        readonly property bool revealed: !wantHidden || hovered || lingering || menuKey !== "" || dragUid >= 0
 
         onHoveredChanged: if (!hovered) { lingering = true; lingerTimer.restart() }
 
@@ -542,7 +575,11 @@ Item {
         // 1.33) so resting icons land on whole pixels instead of smearing.
         function snap(v) { return Math.round(v * dpr) / dpr }
         readonly property real restIcon: snap(root.iconSize)
-        readonly property real headroom: root.iconSize * (root.magnify - 1) + 40
+        // Room above the dock for an icon lifted off it. Always there: growing
+        // the surface as a drag began made the dock jump while the compositor
+        // caught up with the new size. It's transparent and outside the input
+        // mask, so it costs nothing.
+        readonly property real headroom: root.iconSize * (root.magnify - 1) + 40 + root.iconSize * 2.5
         implicitWidth: Math.ceil(root.baseWidth + root.iconSize * (root.magnify - 1) * 3 + 160)
         implicitHeight: Math.ceil(root.edgeGap + root.dockHeight + headroom)
 
@@ -562,6 +599,93 @@ Item {
 
         // Mouse x in the dock's un-magnified coordinates.
         readonly property real pointerX: frame.mouseX - (dock.x + dock.width / 2) + root.baseWidth / 2
+
+        // ------------------------------------------------------------ drag
+        // Drag an icon along the dock to move it; left of the divider pins
+        // it, right of it unpins it. Lift a pinned icon off the dock to
+        // remove it. The cells reorder as it passes and the icons it passes
+        // slide over; the order is written on the drop.
+        property int dragUid: -1
+        property var dragSlot: null
+        property real dragX: 0       // the dragged icon's left/top, in row coordinates
+        property real dragY: 0
+        property real grabX: 0
+        property real grabY: 0
+        property bool canRemove: false
+        property bool removing: false
+
+        function dragRow() {
+          for (var i = 0; i < cells.count; i++) if (cells.get(i).uid === panel.dragUid) return i
+          return -1
+        }
+
+        function startDrag(slot, cell, p) {
+          panel.closeMenu()
+          var c = cell.mapToItem(row, 0, 0)
+          // Pressed on a magnified icon: keep the same spot of it in hand
+          // as it shrinks back to its resting size.
+          var k = cell.width > 0 ? panel.restIcon / cell.width : 1
+          panel.grabX = (p.x - c.x) * k
+          panel.grabY = (p.y - c.y) * k
+          panel.dragSlot = slot
+          panel.canRemove = root.pinned.indexOf(slot.key) >= 0
+          panel.removing = false
+          panel.dragUid = slot.uid
+          root.dragKey = slot.key
+        }
+
+        function dragTo(p) {
+          panel.dragX = p.x - panel.grabX
+          panel.dragY = p.y - panel.grabY
+          var lift = (row.height - panel.restIcon) - panel.dragY
+          panel.removing = panel.canRemove && lift > root.iconSize * 1.2
+          if (!panel.removing) panel.retarget(panel.dragX + panel.restIcon / 2)
+        }
+
+        // Move the dragged cell to where its centre now falls among the
+        // others; class-only apps can't be pinned, so stay right of the divider.
+        function retarget(center) {
+          var from = panel.dragRow()
+          var self = from >= 0 ? cellRepeater.itemAt(from) : null
+          if (!self) return
+          var w = self.width
+          // Laid out from the widths, not the Row: it repositions on the
+          // next frame, and two moves can come in before then.
+          var n = 0, seen = 0, sep = -1, x = 0
+          for (var k = 0; k < cells.count; k++) {
+            if (k === from) continue
+            var s = cellRepeater.itemAt(k)
+            var c = cells.get(k)
+            if (c.separator && !c.leaving) sep = seen
+            if (s && x + s.iconCenter < center) n = seen + 1
+            if (s) x += s.width
+            seen++
+          }
+          if (self.key.indexOf("class:") === 0 && sep >= 0) n = Math.max(n, sep + 1)
+          if (n === from) return
+          cells.move(from, n, 1)
+          // The cells it passed each shift by its width: start them where
+          // they were and let them slide over.
+          for (var a = Math.min(from, n + 1); a <= Math.max(from, n - 1); a++) {
+            var moved = cellRepeater.itemAt(a)
+            if (moved && moved !== self) moved.nudge(n > from ? w : -w)
+          }
+        }
+
+        function endDrag(cancelled) {
+          var slot = panel.dragSlot
+          var removed = panel.removing && !cancelled
+          slot.hold()
+          panel.dragUid = -1
+          panel.dragSlot = null
+          panel.removing = false
+          if (cancelled) root.revertOrder()
+          else root.commitOrder(slot.key, removed)
+          // Gone from the dock: fade out where it was let go. Otherwise
+          // settle into its place.
+          if (removed && slot.leaving) slot.collapsed = true
+          else slot.settle()
+        }
 
         // Hover tracking lives on an Item that contains the dock: a handler
         // declared straight on the PanelWindow never receives events.
@@ -612,6 +736,7 @@ Item {
               spacing: 0
 
               Repeater {
+                id: cellRepeater
                 model: cells
 
                 delegate: Item {
@@ -627,9 +752,27 @@ Item {
                   Behavior on grow { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
                   onGrowChanged: if (leaving && grow <= 0) Qt.callLater(root.dropCell, uid)
 
-                  width: (cell.width + panel.snap(root.spacing)) * grow
+                  // Collapses while its icon is held off the dock to remove it.
+                  property bool collapsed: false
+                  property real room: collapsed || (cell.dragged && panel.removing) ? 0 : 1
+                  Behavior on room { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+
+                  width: (cell.width + panel.snap(root.spacing)) * grow * room
                   height: cell.height
                   anchors.bottom: parent.bottom
+                  z: cell.dragged ? 1 : 0
+                  readonly property real iconCenter: cell.width / 2
+
+                  // Slides over from where it was when a dragged icon passes it.
+                  property real shift: 0
+                  transform: Translate { x: slot.shift }
+                  NumberAnimation { id: shiftAnim; target: slot; property: "shift"; to: 0; duration: 220; easing.type: Easing.OutCubic }
+                  function nudge(dx) { shiftAnim.stop(); slot.shift += dx; shiftAnim.from = slot.shift; shiftAnim.start() }
+
+                  // Let go of: keep the icon where it was dropped, then glide home.
+                  function hold() { cell.dropX = cell.liftX; cell.dropY = cell.liftY; cell.settleT = 1 }
+                  function settle() { settleAnim.restart() }
+                  NumberAnimation { id: settleAnim; target: cell; property: "settleT"; from: 1; to: 0; duration: 260; easing.type: Easing.OutCubic }
 
                   Item {
                     id: cell
@@ -639,6 +782,14 @@ Item {
                     scale: slot.grow
                     opacity: slot.grow
                     transformOrigin: Item.Bottom
+                    // Following the pointer while dragged, gliding back after.
+                    readonly property bool dragged: panel.dragUid === slot.uid
+                    property real dropX: 0
+                    property real dropY: 0
+                    property real settleT: 0
+                    readonly property real liftX: dragged ? panel.dragX - slot.x - slot.shift : dropX * settleT
+                    readonly property real liftY: dragged ? panel.dragY - slot.y - cell.y : dropY * settleT
+                    transform: Translate { x: cell.liftX; y: cell.liftY }
                     readonly property var wins: root.windowsByKey[key] || []
                     readonly property bool isActive: {
                       for (var i = 0; i < wins.length; i++) if (wins[i].address === root.activeAddress) return true
@@ -646,7 +797,7 @@ Item {
                     }
 
                     readonly property real target: {
-                      if (isSep || slot.leaving || !panel.hovered || root.magnify <= 1 || panel.menuKey !== "") return 1
+                      if (isSep || slot.leaving || !panel.hovered || root.magnify <= 1 || panel.menuKey !== "" || panel.dragUid >= 0) return 1
                       var d = (panel.pointerX - (root.baseCenters[index] || 0)) / (root.iconSize + root.spacing)
                       return 1 + (root.magnify - 1) * Math.exp(-d * d / 1.6)
                     }
@@ -677,7 +828,7 @@ Item {
                       width: parent.width
                       height: parent.height
                       y: -cell.hop
-                      opacity: mouse.pressed ? 0.7 : 1
+                      opacity: mouse.pressed && !cell.dragged ? 0.7 : 1
                       readonly property string src: cell.isSep ? "" : root.iconFor(cell.key)
                       readonly property bool big: cell.zoom > 1.01
 
@@ -740,7 +891,8 @@ Item {
 
                     Rectangle {
                       id: tip
-                      visible: !cell.isSep && mouse.containsMouse && panel.menuKey === "" && !mouse.pressed
+                      readonly property bool removing: cell.dragged && panel.removing
+                      visible: removing || (!cell.isSep && mouse.containsMouse && panel.menuKey === "" && !mouse.pressed && panel.dragUid < 0)
                       anchors.horizontalCenter: parent.horizontalCenter
                       anchors.bottom: icon.top
                       anchors.bottomMargin: 8
@@ -753,7 +905,7 @@ Item {
                       Text {
                         id: tipText
                         anchors.centerIn: parent
-                        text: cell.isSep ? "" : root.nameFor(cell.key)
+                        text: tip.removing ? "Remove from Dock" : cell.isSep ? "" : root.nameFor(cell.key)
                         textFormat: Text.PlainText
                         color: Commons.Color.tooltip.text
                         font.pixelSize: Style.font.body
@@ -767,7 +919,29 @@ Item {
                       anchors.margins: -root.spacing / 2
                       hoverEnabled: true
                       acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+                      preventStealing: true
+                      // A left press that travels past the drag distance
+                      // picks the icon up instead of clicking it.
+                      property bool moved: false
+                      property point pressAt
+                      onPressed: function(ev) {
+                        moved = false
+                        pressAt = mapToItem(row, ev.x, ev.y)
+                      }
+                      onPositionChanged: function(ev) {
+                        if (!(ev.buttons & Qt.LeftButton) || panel.dragUid >= 0 && !cell.dragged) return
+                        var p = mapToItem(row, ev.x, ev.y)
+                        if (!moved) {
+                          if (Math.hypot(p.x - pressAt.x, p.y - pressAt.y) < Qt.styleHints.startDragDistance) return
+                          moved = true
+                          panel.startDrag(slot, cell, pressAt)
+                        }
+                        panel.dragTo(p)
+                      }
+                      onReleased: if (moved && cell.dragged) panel.endDrag(false)
+                      onCanceled: if (moved && cell.dragged) panel.endDrag(true)
                       onClicked: function(ev) {
+                        if (moved) return
                         if (ev.button !== Qt.RightButton) panel.closeMenu()
                         if (ev.button === Qt.LeftButton) root.activate(cell.key)
                         else if (ev.button === Qt.MiddleButton) root.launch(cell.key)

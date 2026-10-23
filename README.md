@@ -13,7 +13,8 @@ A window overview, a dock and a notification center for
 - **Dock.** Pinned and running apps along the bottom of the screen. It hides
   only while a window actually covers it. Click an app with several windows
   and the overview opens on just those; click one whose window is on another
-  desktop and the overview slides you there.
+  desktop and the overview slides you there. Drag icons to rearrange them:
+  across the divider to pin or unpin an app, or up off the dock to remove it.
 - **Notification center**, from
   [Foamy Notification Center](https://github.com/foamrider/foamy-notification-center)
   by foamrider. A sheet that slides in from the right edge, with
@@ -117,8 +118,9 @@ whatever was bound before.
 
 ### The dock
 
-Configured in `~/.config/omarchy/dock.json`, which the dock watches. Pinning
-and unpinning from an icon's right-click menu writes it for you. See
+Configured in `~/.config/omarchy/dock.json`, which the dock watches. Pinning,
+unpinning and rearranging icons, from an icon's right-click menu or by
+dragging it, writes it for you. See
 [extras/dock.example.json](extras/dock.example.json):
 
 | Key | Default | |

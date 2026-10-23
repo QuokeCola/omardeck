@@ -15,13 +15,16 @@ running apps.
   just that app's windows to pick one (`windowPicker: "cycle"` cycles instead). Middle click: new window.
   Right click: menu with the app's windows (and their workspaces), New Window,
   Keep in Dock / Unpin, Close
+- Drag an icon to move it: left of the divider pins it in that place, right of
+  it unpins it. Lift a pinned icon up off the dock to remove it. Apps known
+  only by their window class stay among the running ones
 
 Enable by adding `{ "id": "quokecola.dock" }` to `plugins` in
 `~/.config/omarchy/shell.json`, then `omarchy restart shell`.
 
 ## Config
 
-`~/.config/omarchy/dock.json` (watched; Pin/Unpin rewrites `pinned`):
+`~/.config/omarchy/dock.json` (watched; Pin/Unpin and dragging rewrite `pinned`):
 
 ```json
 {
