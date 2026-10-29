@@ -35,6 +35,41 @@ float sdRoundBox(vec2 p, vec2 b, float r) {
     return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
 }
 
+bool inShape(vec2 px) {
+    if (any(lessThan(px, vec2(0.0))) || any(greaterThan(px, boxSize)))
+        return false;
+    return texture(surf, px / boxSize).a > alphaCut;
+}
+
+vec2 axis(int i) {
+    return i == 0 ? vec2(1.0, 0.0) : i == 1 ? vec2(-1.0, 0.0) : i == 2 ? vec2(0.0, 1.0) : vec2(0.0, -1.0);
+}
+
+// Distance from p along u to the shape's edge, up to `reach`: coarse steps to
+// find the crossing, then bisection to well under a pixel.
+float edgeDist(vec2 p, vec2 u, float reach) {
+    float step_ = reach / 8.0;
+    float a = 0.0, b = reach;
+    bool  found = false;
+    for (int k = 1; k <= 8; k++) {
+        if (!found && !inShape(p + u * (step_ * float(k)))) {
+            a     = step_ * float(k - 1);
+            b     = step_ * float(k);
+            found = true;
+        }
+    }
+    if (!found)
+        return reach;
+    for (int k = 0; k < 6; k++) {
+        float m = 0.5 * (a + b);
+        if (inShape(p + u * m))
+            a = m;
+        else
+            b = m;
+    }
+    return 0.5 * (a + b);
+}
+
 void main() {
     vec2 uvSpan = uvBR - uvTL;
     vec2 local  = (v_texcoord - uvTL) / uvSpan * boxSize;  // px within box
@@ -58,25 +93,35 @@ void main() {
     float lip  = 1.0 - t;
 
     if (shapeMode == 1) {
-        // Coverage of a ring of taps ~ how deep inside the shape we are; the
-        // alpha-weighted tap direction points inward, so -dir is the edge normal.
-        vec2  suv  = local / boxSize;
-        float cov  = 0.0;
-        vec2  dir  = vec2(0.0);
-        for (int i = 0; i < 12; i++) {
-            float ang = float(i) * 0.5235988;            // 30 degrees
-            vec2  u   = vec2(cos(ang), sin(ang));
-            for (int k = 1; k <= 2; k++) {
-                vec2  o = u * (bezel * 0.5 * float(k)) / boxSize;
-                float a = smoothstep(alphaCut * 0.5, alphaCut + 0.05, texture(surf, suv + o).a);
-                cov += a;
-                dir += u * a;
-            }
+        // The card is somewhere inside the surface: find its edges along the
+        // four axes, rebuild its box, and give it the same lens as a window.
+        // Edge distances vary continuously with position, so the warp does too
+        // (fixed taps made it jump in steps, which showed as blocks).
+        float reach = 2.0 * max(bezel, 1.0);
+        bool  edgeNear = false;
+        for (int i = 0; i < 4; i++)
+            edgeNear = edgeNear || !inShape(local + axis(i) * bezel);
+        if (!edgeNear) {
+            // deep inside: flat glass, nothing to bend
+            n   = vec2(0.0);
+            lip = 0.0;
+            d   = -bezel;
+        } else {
+            float ed[4];  // +x, -x, +y, -y
+            for (int i = 0; i < 4; i++)
+                ed[i] = edgeDist(local, axis(i), reach);
+            vec2 lo    = local - vec2(ed[1], ed[3]);
+            vec2 hi    = local + vec2(ed[0], ed[2]);
+            vec2 cHalf = max((hi - lo) * 0.5, vec2(0.5));
+            vec2 cp    = local - (lo + hi) * 0.5;
+            float cr   = min(radius, min(cHalf.x, cHalf.y));
+            float crn  = min(max(cr, bezel), min(cHalf.x, cHalf.y));
+            vec2  g    = vec2(sdRoundBox(cp + e.xy, cHalf, crn) - sdRoundBox(cp - e.xy, cHalf, crn),
+                              sdRoundBox(cp + e.yx, cHalf, crn) - sdRoundBox(cp - e.yx, cHalf, crn));
+            n   = length(g) > 1e-5 ? normalize(g) : vec2(0.0);
+            lip = 1.0 - clamp(-sdRoundBox(cp, cHalf, crn) / max(bezel, 1.0), 0.0, 1.0);
+            d   = sdRoundBox(cp, cHalf, cr);
         }
-        cov /= 24.0;
-        n    = length(dir) > 1e-3 ? -normalize(dir) : vec2(0.0);
-        lip  = clamp((1.0 - cov) * 2.0, 0.0, 1.0);       // cov 0.5 at the edge, 1 deep inside
-        d    = -0.5 - (1.0 - lip) * bezel;               // feed the edge line / mask below
     }
     float mag  = refraction * lip * lip * lip;             // steep at the edge, flat inside
 

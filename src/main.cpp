@@ -14,6 +14,7 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/Shader.hpp>
 #include <hyprland/src/render/Texture.hpp>
+#include <hyprland/src/render/pass/Pass.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/config/values/types/FloatValue.hpp>
@@ -39,6 +40,7 @@ using FnTex  = void (*)(CHyprOpenGLImpl*, SP<ITexture>, const CBox&, const STexD
 static HANDLE         g_handle    = nullptr;
 static CFunctionHook* g_hookBlur  = nullptr;
 static CFunctionHook* g_hookTex   = nullptr;
+static CFunctionHook* g_hookRadius = nullptr;
 static ITexture*      g_pendingBG = nullptr;  // the blurredBG the current blur pass is about to draw
 static SP<ITexture>   g_pendingShape;          // surface texture whose alpha defines the glass shape (full-screen layers)
 static float          g_pendingCut = 0.F;
@@ -291,9 +293,24 @@ static void hkRenderTextureInternal(CHyprOpenGLImpl* thisptr, SP<ITexture> tex, 
     ((FnTex)g_hookTex->m_original)(thisptr, tex, box, data);
 }
 
-static CFunctionHook* hookMember(const std::string& name, void* dest) {
+// Hyprland re-blurs only a margin of oneBlurRadius() around what changed. The
+// lens reads up to refraction * (1 + dispersion) px away, which with a small
+// blur is far past that margin, so it would pick up stale pixels: widen it.
+using FnRadius = float (*)(Render::CRenderPass*);
+static float hkOneBlurRadius(Render::CRenderPass* thisptr) {
+    const float orig = ((FnRadius)g_hookRadius->m_original)(thisptr);
+    if (!g_cfg.enabled->value())
+        return orig;
+    float scale = 1.F;
+    for (const auto& m : State::monitorState()->monitors())
+        scale = std::max(scale, m->m_scale);
+    const float reach = std::abs(g_cfg.refraction->value()) * (1.F + std::max(0.F, g_cfg.dispersion->value())) * scale;
+    return std::max(orig, std::ceil(reach) + 2.F);
+}
+
+static CFunctionHook* hookMember(const std::string& name, void* dest, const std::string& cls = "CHyprOpenGLImpl") {
     for (auto& fn : HyprlandAPI::findFunctionsByName(g_handle, name)) {
-        if (fn.demangled.find("CHyprOpenGLImpl::" + name + "(") == std::string::npos)
+        if (fn.demangled.find(cls + "::" + name + "(") == std::string::npos)
             continue;
         auto hook = HyprlandAPI::createFunctionHook(g_handle, fn.address, dest);
         if (hook && hook->hook())
@@ -347,6 +364,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g_hookBlur = hookMember("renderTextureWithBlurInternal", (void*)&hkRenderTextureWithBlurInternal);
     g_hookTex  = hookMember("renderTextureInternal", (void*)&hkRenderTextureInternal);
+    g_hookRadius = hookMember("oneBlurRadius", (void*)&hkOneBlurRadius, "Render::CRenderPass");
 
     // A reload puts the file's blur back: that's the user's now, so save it and
     // override it again — after the reload is done, not from inside it.
