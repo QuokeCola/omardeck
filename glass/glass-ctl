@@ -20,7 +20,11 @@
 set -uo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-rundir=${XDG_RUNTIME_DIR:-/tmp}
+# Where the copy Hyprland loads lives: the session's own runtime dir, or a
+# private one of ours, never a shared /tmp where someone else could put a
+# library of their own in its place.
+rundir=${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/omardeck/run}
+mkdir -p -m 700 "$rundir" 2>/dev/null
 
 fail() {
   echo "$1" >&2

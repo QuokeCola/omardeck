@@ -81,7 +81,10 @@ while it ran. A few things it may have written stay until you remove them:
 - the dock's settings, `~/.config/omarchy/dock.json`;
 - the notification archive, `~/.local/state/omarchy-notification-center`;
 - the touchpad rule, if you installed it:
-  `sudo rm /etc/udev/rules.d/70-omardeck-touchpad.rules`.
+  `sudo rm /etc/udev/rules.d/70-omardeck-touchpad.rules`;
+- liquid glass, if you turned it on: Hyprland keeps a loaded plugin until
+  you log out, and its builds stay in `~/.cache/omardeck/liquidglass`
+  (`rm -r ~/.cache/omardeck`).
 
 ## Use
 
