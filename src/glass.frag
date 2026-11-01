@@ -129,13 +129,20 @@ void main() {
     vec2 pxToUv = uvSpan / boxSize;
     vec2 off    = -n * mag * pxToUv;
 
+    // Hyprland blurs only under this surface (plus a few px); past its box the
+    // blur buffer holds leftovers from other surfaces, which flicker. A thin
+    // surface like the bar would otherwise sample right through itself.
+    vec2 halfTexel = 0.5 / vec2(textureSize(tex, 0));
+    vec2 uvLo = min(uvTL, uvBR) + halfTexel;
+    vec2 uvHi = max(uvTL, uvBR) - halfTexel;
+
     vec3 col;
     if (dispersion > 0.001) {
-        col.r = texture(tex, v_texcoord + off * (1.0 - dispersion)).r;
-        col.g = texture(tex, v_texcoord + off).g;
-        col.b = texture(tex, v_texcoord + off * (1.0 + dispersion)).b;
+        col.r = texture(tex, clamp(v_texcoord + off * (1.0 - dispersion), uvLo, uvHi)).r;
+        col.g = texture(tex, clamp(v_texcoord + off, uvLo, uvHi)).g;
+        col.b = texture(tex, clamp(v_texcoord + off * (1.0 + dispersion), uvLo, uvHi)).b;
     } else {
-        col = texture(tex, v_texcoord + off).rgb;
+        col = texture(tex, clamp(v_texcoord + off, uvLo, uvHi)).rgb;
     }
 
     float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
