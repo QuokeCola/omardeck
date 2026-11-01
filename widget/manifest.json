@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "quokecola.liquid-glass",
+  "name": "Liquid Glass",
+  "version": "1.0.0",
+  "author": "QuokeCola",
+  "license": "MIT",
+  "description": "Bar toggle for the liquidglass Hyprland plugin.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Liquid Glass",
+    "description": "Turn the liquid glass effect on or off. Left click opens the panel, right click toggles.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "pluginPath": "~/src/hypr-liquid-glass/liquidglass.so"
+    },
+    "schema": [
+      { "key": "pluginPath", "type": "string", "label": "Plugin library", "defaultValue": "~/src/hypr-liquid-glass/liquidglass.so", "description": "Built liquidglass.so, loaded from a fresh copy when the glass is turned on." }
+    ]
+  }
+}
