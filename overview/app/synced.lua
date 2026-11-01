@@ -1,5 +1,8 @@
 -- SUPER + number with "All screens together" on: every screen to that
--- desktop at once.
+-- desktop at once, sliding there the way SUPER + CTRL + arrows do. The slide
+-- is the overview's: the key sends it hl.dsp.event("aerial,desk:<n>"), and
+-- where it cannot slide it switches every screen straight there instead
+-- (`switchDesk` in Overlay.qml).
 --
 -- Each screen owns a block of ten workspaces — the laptop's panel 1-10, the
 -- others left to right 11-20, 21-30 — and desktop 3 is workspace 3, 13 and 23.
@@ -36,37 +39,17 @@ local function here(n)
   return n
 end
 
--- Every screen to desktop n, the one you are on last so it keeps focus.
--- Focusing each screen would drag the pointer across all of them; warps are
--- off for the trip.
-local function switch(n)
-  local warps = hl.get_config("cursor.no_warps")
-  hl.config({ cursor = { no_warps = true } })
-  local focused
-  for i, m in ipairs(screens()) do
-    if m.focused then
-      focused = m.name
-    end
-    hl.dispatch(hl.dsp.focus({ monitor = m.name }))
-    hl.dispatch(hl.dsp.focus({ workspace = tostring(n + 10 * (i - 1)), on_current_monitor = true }))
-  end
-  if focused then
-    hl.dispatch(hl.dsp.focus({ monitor = focused }))
-  end
-  hl.config({ cursor = { no_warps = warps } })
-end
-
 for n = 1, 10 do
   local key = "code:" .. tostring(n + 9)
   hl.unbind("SUPER + " .. key)
   hl.unbind("SUPER + SHIFT + " .. key)
   hl.unbind("SUPER + SHIFT + ALT + " .. key)
   hl.bind("SUPER + " .. key, function()
-    switch(n)
+    hl.dispatch(hl.dsp.event("aerial,desk:" .. n))
   end, { description = "Switch all screens to desktop " .. n })
   hl.bind("SUPER + SHIFT + " .. key, function()
     hl.dispatch(hl.dsp.window.move({ workspace = tostring(here(n)), follow = false }))
-    switch(n)
+    hl.dispatch(hl.dsp.event("aerial,desk:" .. n))
   end, { description = "Move window to desktop " .. n })
   hl.bind("SUPER + SHIFT + ALT + " .. key, function()
     hl.dispatch(hl.dsp.window.move({ workspace = tostring(here(n)), follow = false }))

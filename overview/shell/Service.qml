@@ -103,6 +103,8 @@ Item {
   signal stepRequested(int step)
   // Slide to the desktop a window is on, however far, and focus it there.
   signal jumpRequested(string address)
+  // Slide to a desktop by its number (1-10), however far.
+  signal deskRequested(int desk)
 
   /** Called by the dock when you click an app whose one window is on another
       desktop; also reachable as hl.dsp.event("aerial,goto:<address>"). */
@@ -136,6 +138,22 @@ Item {
       service.refreshModels()
     }
     service.stepRequested(step)
+  }
+
+  /** Slide to desktop n, from a key: SUPER + number with "All screens
+      together" on (see app/synced.lua), as hl.dsp.event("aerial,desk:<n>").
+      Unlike `go`, never dropped: where the overview cannot slide, the
+      overlay switches straight there instead. */
+  function desk(n) {
+    const d = parseInt(n, 10)
+    if (!(d >= 1 && d <= 10)) return
+    if (!service.open && !service.showing && service.scrub === "") {
+      service.deskSlide = true
+      service.aim()
+      service.arming()
+      service.refreshModels()
+    }
+    service.deskRequested(d)
   }
 
   // ---------------------------------------------------------------- opening
@@ -599,6 +617,10 @@ Item {
 
     if (what === "go") {
       service.go(rest)
+      return
+    }
+    if (what === "desk") {
+      service.desk(rest)
       return
     }
     if (what === "app") {

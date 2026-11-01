@@ -43,10 +43,35 @@ Item {
   Timer {
     id: settle
     interval: 800
-    onTriggered: screens.look()
+    onTriggered: {
+      screens.followFocus = false
+      screens.look()
+    }
   }
 
   function soon() { if (screens.enabled) settle.restart() }
+
+  // ------------------------------------------------ one screen went somewhere
+
+  // A desktop chosen on one screen by anything that is not ours — the bar's
+  // workspace buttons, SUPER + Tab, a script — changes only that screen.
+  // Bring the others along: once the workspace events have stopped, every
+  // screen goes to the desktop the focused one is on. Our own switches leave
+  // every screen on one desktop already, so they find nothing to do.
+  //
+  // Not while screens are coming and going: a screen just plugged in is
+  // focused on whatever workspace was free, and that is not a choice.
+  property bool followFocus: false
+
+  Timer {
+    id: follow
+    interval: 150
+    onTriggered: {
+      if (!screens.enabled || settle.running) return
+      screens.followFocus = true
+      screens.look()
+    }
+  }
 
   onEnabledChanged: {
     screens.soon()
@@ -130,6 +155,8 @@ Item {
           || name === "monitorremoved" || name === "monitorremovedv2"
           || name === "configreloaded")
         screens.soon()
+      else if (screens.enabled && (name === "workspacev2" || name === "workspace"))
+        follow.restart()
       if (name === "configreloaded" && screens.enabled) rebind.restart()
     }
   }
@@ -140,14 +167,22 @@ Item {
     stdout: StdioCollector {
       onStreamFinished: {
         const answers = text.split("\n\n\n").map(s => { try { return JSON.parse(s) } catch (e) { return null } })
-        if (Array.isArray(answers[0]) && Array.isArray(answers[1])) screens.align(answers[0], answers[1])
+        const lead = screens.followFocus ? "focused" : "laptop"
+        screens.followFocus = false
+        if (Array.isArray(answers[0]) && Array.isArray(answers[1])) screens.align(answers[0], answers[1], lead)
       }
     }
   }
 
   function look() {
     if (!screens.enabled) return
-    if (query.running) { settle.restart(); return }
+    if (query.running) {
+      if (screens.followFocus) {
+        screens.followFocus = false
+        follow.restart()
+      } else settle.restart()
+      return
+    }
     query.running = true
   }
 
@@ -162,7 +197,7 @@ Item {
 
   function screenId(m) { return String(m.description || m.name) }
 
-  function align(monitors, clients) {
+  function align(monitors, clients, lead) {
     const order = screens.ordered(monitors)
     if (order.length === 0) return
     const index = ({})
@@ -210,16 +245,18 @@ Item {
 
     screens.folded = kept
     screens.lastOrder = byId
-    screens.run(order, moves)
+    screens.run(order, moves, lead)
   }
 
   Process { id: dispatch }
 
-  /** The windows to their workspaces and every screen to the laptop's
-      desktop, all in one go, with the pointer left where it is. */
-  function run(order, moves) {
+  /** The windows to their workspaces and every screen to the desktop of the
+      laptop — or, with `lead` "focused", of the screen in use — all in one
+      go, with the pointer left where it is. */
+  function run(order, moves, lead) {
     const laptop = order[0]
-    const shown = laptop.activeWorkspace && laptop.activeWorkspace.id > 0 ? laptop.activeWorkspace.id : 1
+    const leader = lead === "focused" ? (order.find(m => m.focused) || laptop) : laptop
+    const shown = leader.activeWorkspace && leader.activeWorkspace.id > 0 ? leader.activeWorkspace.id : 1
     const desk = Number.isInteger(shown) ? (shown - 1) % 10 + 1 : 1
     const lagging = order.some((m, i) => !m.activeWorkspace || m.activeWorkspace.id !== desk + 10 * i)
     if (!lagging && moves.length === 0) return

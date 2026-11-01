@@ -851,6 +851,7 @@ Scope {
     target: root.service
     function onSideSwipe(phase, value, velocity, cancelled) { root.onSide(phase, value, velocity, cancelled) }
     function onJumpRequested(address) { root.jumpToWindow(address) }
+    function onDeskRequested(desk) { root.jumpToDesk(desk) }
     function onStepRequested(step) {
       if (!root.canSlide) {
         root.endDeskSlide()
@@ -976,22 +977,80 @@ Scope {
   property int jumpTo: 0
   property string landOn: ""
   property string pendingJump: ""
-  onRevealChanged: if (root.reveal >= 1 && root.pendingJump !== "") {
-    const address = root.pendingJump
-    root.pendingJump = ""
-    jumpWait.stop()
-    root.jumpToWindow(address)
+  property int pendingDesk: 0
+  onRevealChanged: if (root.reveal >= 1) {
+    if (root.pendingJump !== "") {
+      const address = root.pendingJump
+      root.pendingJump = ""
+      jumpWait.stop()
+      root.jumpToWindow(address)
+    } else if (root.pendingDesk > 0) {
+      const desk = root.pendingDesk
+      root.pendingDesk = 0
+      jumpWait.stop()
+      root.jumpToDesk(desk)
+    }
   }
   // Never ready: go there without the slide.
   Timer {
     id: jumpWait
     interval: 500
-    onTriggered: if (root.pendingJump !== "") {
-      const address = root.pendingJump
-      root.pendingJump = ""
-      root.endDeskSlide()
-      Hyprland.dispatch('hl.dsp.focus({ window = "address:0x' + address + '" })')
+    onTriggered: {
+      if (root.pendingJump !== "") {
+        const address = root.pendingJump
+        root.pendingJump = ""
+        root.endDeskSlide()
+        Hyprland.dispatch('hl.dsp.focus({ window = "address:0x' + address + '" })')
+      }
+      if (root.pendingDesk > 0) {
+        const desk = root.pendingDesk
+        root.pendingDesk = 0
+        root.endDeskSlide()
+        root.goStraight(desk)
+      }
     }
+  }
+
+  /** Slide, however many desktops over, to desktop `desk` (SUPER + number).
+      One this screen cannot slide to — not made yet, or the overview showing
+      something it cannot slide through — is switched to straight away. */
+  function jumpToDesk(desk) {
+    if (root.reveal < 1) {
+      root.pendingDesk = desk
+      jumpWait.restart()
+      return
+    }
+    // Mid-landing from the last key: land it first, so the count of desktops
+    // to go starts from where the stage really is.
+    if (slider.running && !root.sliding) {
+      slider.stop()
+      root.finishSlide(slider.target)
+    }
+    const index = root.lanes.indexOf(desk)
+    const step = index - root.stageIndex
+    if (step === 0 && index >= 0) {
+      root.endDeskSlide()
+      return
+    }
+    if (!root.canSlide || root.sliding || index < 0 || root.stageIndex < 0) {
+      root.goStraight(desk)
+      root.endDeskSlide()
+      return
+    }
+    root.jumpTo = step
+    root.slideBy(Math.sign(step))
+    if (!root.moving) {
+      root.jumpTo = 0
+      root.goStraight(desk)
+      root.endDeskSlide()
+    }
+  }
+
+  /** To a desktop with no slide: every screen, or just this one. */
+  function goStraight(desk) {
+    if (root.active) root.stageId = desk
+    if (root.synced) root.switchDesk(desk)
+    else Hyprland.dispatch('hl.dsp.focus({ workspace = "' + desk + '" })')
   }
 
   /** Slide, however many desktops over, to the one a window is on, and land

@@ -110,11 +110,15 @@ moved them since. Every screen is put on the desktop the laptop shows. This
 runs in the shell, so it survives the config reload a monitor profile does on
 resume; what was folded is forgotten when the shell restarts.
 
-SUPER + a number switches every screen to that desktop, SUPER + SHIFT + a
-number takes the window along, and SUPER + SHIFT + ALT + a number sends it
-there without following. These replace Omarchy's own number keys while the
-setting is on; turning it off reloads the Hyprland config, which puts back
-whatever was bound before.
+SUPER + a number slides every screen to that desktop, through any in
+between, the way SUPER + CTRL + arrows do; SUPER + SHIFT + a number takes the
+window along, and SUPER + SHIFT + ALT + a number sends it there without
+following. These replace Omarchy's own number keys while the setting is on;
+turning it off reloads the Hyprland config, which puts back whatever was bound
+before.
+
+Picking a desktop any other way — the bar's workspace buttons, SUPER + Tab,
+a script — brings the other screens along to it too.
 
 ### The dock
 
