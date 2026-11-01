@@ -554,6 +554,54 @@ Item {
   // the settings panel; it costs GPU time while the overview is up.
   property bool frost: true
 
+  // Liquid glass: the liquidglass Hyprland plugin (glass/), which turns
+  // Hyprland's blur into a lens at the edges of whatever it blurs; the
+  // overview's cards draw the same lens (see blur/frost.frag). Set from the
+  // settings panel. glass/glass-ctl builds the plugin for the running
+  // Hyprland the first time, loads it and switches it.
+  property bool liquidGlass: false
+  // "off", "working" (building or loading), "on", or "error" with glassError.
+  property string glassState: "off"
+  property string glassError: ""
+  property bool glassAgain: false
+  readonly property string glassCtl: {
+    const url = Qt.resolvedUrl("../../glass/glass-ctl").toString()
+    return url.startsWith("file://") ? url.slice(7) : url
+  }
+
+  onLiquidGlassChanged: service.applyGlass()
+
+  function applyGlass() {
+    if (glassProc.running) {
+      service.glassAgain = true
+      return
+    }
+    service.glassState = service.liquidGlass ? "working" : "off"
+    service.glassError = ""
+    glassProc.command = [service.glassCtl, service.liquidGlass ? "on" : "off"]
+    glassProc.running = true
+  }
+
+  Process {
+    id: glassProc
+    stderr: StdioCollector { id: glassErr }
+    onExited: (code) => {
+      if (service.glassAgain) {
+        service.glassAgain = false
+        service.applyGlass()
+        return
+      }
+      if (code !== 0 && service.liquidGlass) {
+        service.glassState = "error"
+        service.glassError = String(glassErr.text || "").trim() || "The glass did not start."
+      } else {
+        service.glassState = service.liquidGlass ? "on" : "off"
+      }
+      // The cards follow the compositor's glass.
+      service.readDecoration()
+    }
+  }
+
   // Every screen is one desktop: sliding, or picking one from the strip,
   // switches all of them together. See `synced` in the overlay. Set from the
   // settings panel.
@@ -844,7 +892,13 @@ Item {
   Timer {
     id: rearm
     interval: 600
-    onTriggered: service.registerGesture()
+    onTriggered: {
+      service.registerGesture()
+      // A reload puts the plugin's own settings back to their defaults, its
+      // on/off with them: say again which it is. Off with nothing loaded does
+      // nothing.
+      service.applyGlass()
+    }
   }
 
   Component.onCompleted: {

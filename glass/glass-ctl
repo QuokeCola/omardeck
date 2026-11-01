@@ -1,0 +1,91 @@
+#!/bin/bash
+
+# Liquid glass for omardeck's "Liquid glass" switch.
+#
+#   glass-ctl status   prints "loaded=0|1 enabled=0|1"
+#   glass-ctl on       builds the plugin for the running Hyprland if needed,
+#                      loads it if it is not, and turns the glass on
+#   glass-ctl off      turns the glass off (the library stays loaded)
+#   glass-ctl build    only builds it, printing where the library is
+#
+# A Hyprland plugin only loads into the Hyprland it was built against, so it
+# is built here, on this machine, the first time it is wanted and again after
+# Hyprland updates: one build per Hyprland commit, kept in the cache. The
+# build happens outside the plugin folder, which the shell watches and would
+# reload on every file the compiler writes.
+#
+# Hyprland never really unloads a plugin's library, so a load always goes
+# through a fresh copy in the runtime dir (as the Makefile's `reload` does).
+
+set -uo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+rundir=${XDG_RUNTIME_DIR:-/tmp}
+
+fail() {
+  echo "$1" >&2
+  exit 1
+}
+
+loaded() { hyprctl -j plugin list 2>/dev/null | grep -q '"name": *"liquidglass"'; }
+
+set_enabled() {
+  hyprctl eval "hl.config({ plugin = { liquidglass = { enabled = $1 } } })" >/dev/null
+  # Applies the blur size that goes with the state and repaints.
+  hyprctl liquidglass >/dev/null
+}
+
+build() {
+  local commit cache
+  commit=$(hyprctl version -j 2>/dev/null | jq -r '.commit // empty')
+  [[ $commit =~ ^[0-9a-f]+$ ]] || fail "Could not ask Hyprland which version it is."
+  cache=${XDG_CACHE_HOME:-$HOME/.cache}/omardeck/liquidglass/$commit
+  so=$cache/liquidglass.so
+  if [[ -s $so && ! $here/src/main.cpp -nt $so && ! $here/src/glass.frag -nt $so ]]; then
+    return
+  fi
+  for tool in g++ make pkg-config; do
+    command -v "$tool" >/dev/null || fail "Building the glass needs $tool."
+  done
+  pkg-config --exists hyprland || fail "Building the glass needs Hyprland's headers, which the hyprland package installs."
+  mkdir -p "$cache" || fail "Could not make $cache."
+  cp "$here/Makefile" "$cache/" && cp -r "$here/src" "$cache/" || fail "Could not copy the source to $cache."
+  rm -f "$cache/src/glass.frag.inc"
+  make -s -C "$cache" liquidglass.so >"$cache/build.log" 2>&1 || fail "The glass did not build; see $cache/build.log."
+}
+
+case ${1:-status} in
+  status)
+    if loaded; then
+      enabled=$(hyprctl -j getoption plugin:liquidglass:enabled | grep -q '"bool": *true' && echo 1 || echo 0)
+      echo "loaded=1 enabled=$enabled"
+    else
+      echo "loaded=0 enabled=0"
+    fi
+    ;;
+  on)
+    if ! loaded; then
+      build
+      copy=$rundir/liquidglass-$(date +%s%N).so
+      cp "$so" "$copy" || fail "Could not copy the glass to $rundir."
+      if ! hyprctl plugin load "$copy" >/dev/null || ! loaded; then
+        rm -f "$copy"
+        fail "Hyprland would not load the glass."
+      fi
+      echo "$copy" >"$rundir/liquidglass.loaded"
+    fi
+    set_enabled true
+    ;;
+  build)
+    build
+    echo "$so"
+    ;;
+  off)
+    loaded && set_enabled false
+    exit 0
+    ;;
+  *)
+    echo "usage: glass-ctl status|on|off|build" >&2
+    exit 2
+    ;;
+esac

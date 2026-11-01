@@ -9,8 +9,8 @@ import "../../notifications" as Notifications
 
 // Aerial's settings, from a button on the bar.
 //
-// Three switches that take effect at once — frosted glass, swiping between
-// desktops, and every screen switching desktop together — and Aerial's keyboard shortcuts, which are Hyprland bindings and
+// Four switches that take effect at once — frosted glass, liquid glass,
+// swiping between desktops, and every screen switching desktop together — and Aerial's keyboard shortcuts, which are Hyprland bindings and
 // so live in the user's Omarchy bindings file, in a section of their own (see
 // app/Shortcuts.js). Shortcuts are edited here and only written on Save.
 Panel {
@@ -29,6 +29,7 @@ Panel {
   readonly property bool frost: root.setting("frost", true) !== false
   readonly property bool deskSwipe: root.setting("deskSwipe", true) !== false
   readonly property bool syncScreens: root.setting("syncScreens", false) === true
+  readonly property bool liquidGlass: root.setting("liquidGlass", false) === true
 
   function setSetting(key, value) {
     const next = Object.assign({}, root.settings || {})
@@ -45,11 +46,13 @@ Panel {
     root.service.frost = root.frost
     root.service.deskSwipe = root.deskSwipe
     root.service.syncScreens = root.syncScreens
+    root.service.liquidGlass = root.liquidGlass
   }
   onServiceChanged: root.pushSettings()
   onFrostChanged: root.pushSettings()
   onDeskSwipeChanged: root.pushSettings()
   onSyncScreensChanged: root.pushSettings()
+  onLiquidGlassChanged: root.pushSettings()
 
   Timer {
     // The service can load after the bar; look again until it is there.
@@ -334,6 +337,19 @@ Panel {
           foreground: root.bar.foreground
           fontFamily: root.bar.fontFamily
           onClicked: root.setSetting("frost", !root.frost)
+        }
+
+        Toggle {
+          width: parent.width
+          label: "Liquid glass"
+          readonly property string glassState: root.service ? root.service.glassState : "off"
+          description: glassState === "working" ? "Starting… the first time, and after Hyprland updates, it is built for your Hyprland, which takes a few seconds."
+                     : glassState === "error" ? root.service.glassError
+                     : "Whatever Hyprland blurs bends like glass at its edges: see-through windows, the bar, the dock, these panels and the overview's cards. Turns Hyprland's blur down while on."
+          checked: root.liquidGlass
+          foreground: root.bar.foreground
+          fontFamily: root.bar.fontFamily
+          onClicked: root.setSetting("liquidGlass", !root.liquidGlass)
         }
 
         Toggle {

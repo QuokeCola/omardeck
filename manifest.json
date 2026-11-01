@@ -48,6 +48,7 @@
       "useBrowserFavicons": true,
       "browserGrouping": "browser",
       "frost": true,
+      "liquidGlass": false,
       "deskSwipe": true,
       "syncScreens": false,
       "overviewButton": true
@@ -58,7 +59,7 @@
         "type": "boolean",
         "label": "Overview button",
         "defaultValue": true,
-        "description": "A button beside the bell that opens the overview's settings: frosted glass, desktop swipes, screens switching together, and keyboard shortcuts."
+        "description": "A button beside the bell that opens the overview's settings: frosted glass, liquid glass, desktop swipes, screens switching together, and keyboard shortcuts."
       },
       {
         "key": "compact",

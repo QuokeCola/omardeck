@@ -87,7 +87,7 @@ while it ran. A few things it may have written stay until you remove them:
 
 - **Overview:** three fingers up to open, down to close, sideways to change
   desktop. Four fingers up shows every window on every desktop.
-- **Settings:** the button beside the bell, dropping down from the bar. Frosted glass, desktop swipes,
+- **Settings:** the button beside the bell, dropping down from the bar. Frosted glass, liquid glass, desktop swipes,
   all screens switching together, and keyboard shortcuts (written to their
   own section of `~/.config/hypr/bindings.lua`).
 - **Notification center:** click the bell, or swipe in from the right edge.
@@ -119,6 +119,25 @@ before.
 
 Picking a desktop any other way — the bar's workspace buttons, SUPER + Tab,
 a script — brings the other screens along to it too.
+
+### Liquid glass
+
+Off by default. On, whatever Hyprland blurs bends like glass at its edges,
+with a thin rim of light: see-through windows, the bar and its panels, the
+dock, the notification sheet, and the overview's cards, which draw the same
+lens so a window does not change as it becomes a card. It turns Hyprland's
+blur down while it is on, since the glass reads best over a nearly sharp
+background, and gives yours back when it is off.
+
+It is a Hyprland plugin, in `glass/`, and a Hyprland plugin only loads into
+the Hyprland it was built for. So the first time you switch it on, and again
+after Hyprland updates, it is built on your machine, which takes a few
+seconds and needs `g++`, `make`, `pkg-config` and Hyprland's headers (the
+`hyprland` package installs them). Builds are kept in
+`~/.cache/omardeck/liquidglass/`, one per Hyprland version. While the switch
+is on, the shell loads it at login and after config reloads. How the glass
+looks is the plugin's to set: `plugin:liquidglass:refraction`, `bezel`,
+`dispersion`, `specular` and the rest, listed in `glass/src/main.cpp`.
 
 ### The dock
 
