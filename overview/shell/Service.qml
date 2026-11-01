@@ -169,6 +169,9 @@ Item {
     Hyprland.refreshMonitors()
     Hyprland.refreshWorkspaces()
     Hyprland.refreshToplevels()
+    // Settings changed with `hyprctl eval` raise no event; read them again so
+    // the cards' blur and glass match what the compositor draws now.
+    service.readDecoration()
   }
 
   function show() {
@@ -409,6 +412,15 @@ Item {
     blurIgnoreOpacity: true,
     shadowPower: 1,
     roundingPower: 2,
+    // The liquidglass Hyprland plugin's lens over the blur, when it is loaded.
+    glass: false,
+    glassBezel: 40,
+    glassRefraction: 45,
+    glassDispersion: 0.25,
+    glassSpecular: 0.16,
+    glassLightAngle: 225,
+    glassBrightness: 1.04,
+    glassSaturation: 1.15,
   })
 
   readonly property var decoOptions: [
@@ -422,6 +434,12 @@ Item {
     "decoration:blur:ignore_opacity",
     "decoration:shadow:render_power", "decoration:rounding_power",
     "decoration:shadow:offset",
+    // Not there unless the plugin is loaded, which reads as no glass.
+    "plugin:liquidglass:enabled", "plugin:liquidglass:windows",
+    "plugin:liquidglass:bezel", "plugin:liquidglass:refraction",
+    "plugin:liquidglass:dispersion", "plugin:liquidglass:specular",
+    "plugin:liquidglass:light_angle", "plugin:liquidglass:brightness",
+    "plugin:liquidglass:saturation",
   ]
 
   Process {
@@ -463,6 +481,8 @@ Item {
     const shadowOn = byName["decoration:shadow:enabled"]
     const blurOn = byName["decoration:blur:enabled"]
     const ignoreOpacity = byName["decoration:blur:ignore_opacity"]
+    const on = name => { const e = byName[name]; return !!(e && (e.bool === true || e.int === 1)) }
+    const or = (name, fallback) => byName[name] ? num(name) : fallback
     service.deco = {
       rounding: Math.max(0, num("decoration:rounding")),
       border: Math.max(0, num("general:border_size")),
@@ -479,7 +499,7 @@ Item {
       shadowOffsetX: service.vecOf(byName["decoration:shadow:offset"], 0),
       shadowOffsetY: service.vecOf(byName["decoration:shadow:offset"], 1),
       blur: !!(blurOn && (blurOn.bool === true || blurOn.int === 1)),
-      blurSize: Math.max(1, num("decoration:blur:size")),
+      blurSize: Math.max(0, num("decoration:blur:size")),
       blurPasses: Math.max(1, num("decoration:blur:passes")),
       blurNoise: num("decoration:blur:noise"),
       blurContrast: byName["decoration:blur:contrast"] ? num("decoration:blur:contrast") : 1,
@@ -491,6 +511,14 @@ Item {
       blurIgnoreOpacity: !ignoreOpacity || ignoreOpacity.bool === true || ignoreOpacity.int === 1,
       shadowPower: Math.max(1, Math.min(4, num("decoration:shadow:render_power") || 1)),
       roundingPower: byName["decoration:rounding_power"] ? num("decoration:rounding_power") : 2,
+      glass: on("plugin:liquidglass:enabled") && on("plugin:liquidglass:windows"),
+      glassBezel: or("plugin:liquidglass:bezel", 40),
+      glassRefraction: or("plugin:liquidglass:refraction", 45),
+      glassDispersion: or("plugin:liquidglass:dispersion", 0.25),
+      glassSpecular: or("plugin:liquidglass:specular", 0.16),
+      glassLightAngle: or("plugin:liquidglass:light_angle", 225),
+      glassBrightness: or("plugin:liquidglass:brightness", 1.04),
+      glassSaturation: or("plugin:liquidglass:saturation", 1.15),
     }
   }
 

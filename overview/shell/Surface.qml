@@ -1463,6 +1463,16 @@ PanelWindow {
           }
           property vector2d size: Qt.vector2d(width, height)
           property real radius: card.radius
+          // The liquidglass plugin's lens, as the compositor draws it on the window.
+          property real glass: overlay.deco.glass ? 1 : 0
+          property real bezel: overlay.deco.glassBezel
+          property real refraction: overlay.deco.glassRefraction
+          property real dispersion: overlay.deco.glassDispersion
+          property real specular: overlay.deco.glassSpecular
+          property vector2d lightDir: Qt.vector2d(Math.cos(overlay.deco.glassLightAngle * Math.PI / 180),
+                                                  Math.sin(overlay.deco.glassLightAngle * Math.PI / 180))
+          property real glassBrightness: overlay.deco.glassBrightness
+          property real saturation: overlay.deco.glassSaturation
           fragmentShader: Qt.resolvedUrl("blur/frost.frag.qsb")
         }
 
