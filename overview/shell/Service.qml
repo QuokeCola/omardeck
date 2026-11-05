@@ -574,6 +574,15 @@ Item {
 
   onLiquidGlassChanged: service.applyGlass()
 
+  // A config reload puts the plugin's options back to their defaults, and its
+  // default is on, so a loaded plugin has to be told again that the glass is off.
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      if (event.name === "configreloaded" && !service.liquidGlass) service.applyGlass()
+    }
+  }
+
   function applyGlass() {
     if (glassProc.running) {
       service.glassAgain = true
