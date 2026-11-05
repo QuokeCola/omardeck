@@ -385,8 +385,44 @@ sync_all() {
   local file
   for file in "$src_history"/*.json "$src_dir"/*.json; do
     [[ -e $file ]] || continue
-    ingest_file "$file"
+    ingest_source "$file"
   done
+}
+
+# Since Omarchy 4.5 the service keeps its rows in two files rather than one file
+# per popup; quiet.json holds do-not-disturb. Each row goes through ingest_file
+# as the single-popup record it would once have been. The key is built from the
+# row's arrival time and id, not the service's own key, so a row keeps its archive
+# entry as it moves from live to history. rawBody is what the sender sent, which
+# is where a browser's origin still is: the service empties it when it matches.
+ingest_source() {
+  local file=$1 name scratch row key
+  name=$(basename -- "$file")
+  case $name in
+    quiet.json) return 0 ;;
+    live.json | history.json) ;;
+    *) ingest_file "$file"; return $? ;;
+  esac
+  [[ -s $file ]] || return 0
+  scratch=$(mktemp -d "$store/.ingest.XXXXXX") || return 1
+  while IFS= read -r row; do
+    key=$(jq -r '.key' <<< "$row") || continue
+    # A closed row doesn't change, so one that's archived or removed stays that way.
+    if [[ $name == history.json ]]; then
+      grep -qF "\"key\":\"$key\"" "$archive" 2>/dev/null && continue
+      is_dismissed "$key" && continue
+    fi
+    printf '%s' "$row" > "$scratch/$key.json" || { rm -rf -- "$scratch"; return 1; }
+    ingest_file "$scratch/$key.json" || { rm -rf -- "$scratch"; return 1; }
+    rm -f -- "$scratch/$key.json"
+  done < <(jq -c '
+      if type == "array" then .[] else empty end
+      | select(type == "object" and (.ts | type) == "number" and .ts > 0)
+      | (.ts * 1000 | floor) as $ms
+      | . + { key: "\($ms)-\(.originalId // 0 | floor)", timestamp: $ms,
+              body: (if (.rawBody // "") != "" then .rawBody else (.body // "") end) }
+    ' "$file" 2>/dev/null)
+  rm -rf -- "$scratch"
 }
 
 # ---------------------------------------------------------------- trimming
@@ -563,7 +599,7 @@ cmd_watch() {
       printf '%s\n' '{"event":"storeChanged"}'
     elif [[ $file == "$store/archive.jsonl" || $file == "$cleared_at_file" || $file == "$dismissed_file" ]]; then
       printf '%s\n' '{"event":"storeChanged"}'
-    elif [[ $file == "$source_state_dir/notifications.json" ]]; then
+    elif [[ $file == "$source_state_dir/notifications.json" || $file == "$src_dir/quiet.json" ]]; then
       printf '%s\n' '{"event":"dndChanged"}'
     elif [[ $event == CREATE* ]]; then
       # Ordinary JSON writes are ingested only when complete; Qt links its DND file atomically.
@@ -579,7 +615,7 @@ cmd_watch() {
 
 ingest_one() {
   ingest_changed=0
-  ingest_file "$1" || return $?
+  ingest_source "$1" || return $?
   # Duplicate filesystem events and archival moves do not need a retention rewrite.
   (( ingest_changed )) && prune
   return 0

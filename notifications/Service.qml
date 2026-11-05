@@ -236,7 +236,7 @@ Item {
 
   function refreshDnd() {
     if (dndProc.running) { dndRefresh.restart(); return }
-    dndProc.command = ["omarchy-shell", "notifications", "dndState"]
+    dndProc.command = ["omarchy-shell", "notifications", "isDnd"]
     dndProc.running = true
   }
 

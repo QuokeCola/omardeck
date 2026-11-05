@@ -320,6 +320,9 @@ Scope {
         active: active,
         floating: (top.lastIpcObject || {}).floating === true,
         opacity: alpha ? (active ? alpha.active : alpha.inactive) : (tagged ? (active ? 0.985 : 0.96) : 1),
+        // Omarchy turns the global shadow on for floating workspaces and opts
+        // every other window out, so the option alone doesn't say who has one.
+        shadow: alpha ? alpha.shadow : false,
       })
       if (entry !== before[top.address]) changed = true
       out[top.address] = entry
@@ -516,7 +519,7 @@ Scope {
   // Asked for each time the overview opens, along with `zOrder`: one hyprctl
   // run rather than two.
   property var alphas: ({})
-  readonly property var alphaProps: ["opacity", "opacity_override", "opacity_inactive", "opacity_inactive_override"]
+  readonly property var alphaProps: ["opacity", "opacity_override", "opacity_inactive", "opacity_inactive_override", "no_shadow"]
   Process {
     id: alphaQuery
     property var keys: []
@@ -535,12 +538,13 @@ Scope {
         const decoInactive = deco(2)
         const out = ({})
         alphaQuery.keys.forEach((key, i) => {
-          const a = answers.slice(3 + i * 4, 7 + i * 4)
+          const count = root.alphaProps.length
+          const a = answers.slice(3 + i * count, 3 + (i + 1) * count)
           // A window that closed meanwhile answers in words, not JSON.
-          if (a.length < 4 || a.some(x => !x)) return
+          if (a.length < count || a.some(x => !x)) return
           const active = Math.max(0, Math.min(1, a[1].opacity_override ? a[0].opacity : a[0].opacity * decoActive))
           const inactive = Math.max(0, Math.min(1, a[3].opacity_inactive_override ? a[2].opacity_inactive : a[2].opacity_inactive * decoInactive))
-          out[key] = root.kept(root.alphas[key], { active: active, inactive: inactive })
+          out[key] = root.kept(root.alphas[key], { active: active, inactive: inactive, shadow: !a[4].no_shadow })
         })
         // Only when it changed; see `geo`.
         const same = Object.keys(out).length === Object.keys(root.alphas).length

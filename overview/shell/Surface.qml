@@ -1403,7 +1403,7 @@ PanelWindow {
           height: (card.pxH + 2 * reach) / surface.hyprScale
           z: -1
           opacity: card.dressedAway
-          visible: overlay.deco.shadow && spread > 0 && opacity > 0.01 && !card.dragging
+          visible: overlay.deco.shadow && card.real.shadow === true && spread > 0 && opacity > 0.01 && !card.dragging
           property vector4d color: Qt.vector4d(tint.r, tint.g, tint.b, tint.a)
           property vector2d fullSize: Qt.vector2d(card.pxW + 2 * reach, card.pxH + 2 * reach)
           property vector2d topLeft: Qt.vector2d(spread + corner, spread + corner)

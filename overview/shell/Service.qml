@@ -491,8 +491,11 @@ Item {
       shadow: !!(shadowOn && (shadowOn.bool === true || shadowOn.int === 1)),
       shadowRange: Math.max(0, num("decoration:shadow:range")),
       shadowColor: service.colourOf(byName["decoration:shadow:color"]),
-      shadowColorInactive: service.colourOf(byName["decoration:shadow:color_inactive"]
-                                            || byName["decoration:shadow:color"]),
+      // Hyprland reports this one as ffffffff when it is unset, which means
+      // "same as the active colour", so `set` says which to read.
+      shadowColorInactive: service.colourOf(byName["decoration:shadow:color_inactive"]?.set
+                                            ? byName["decoration:shadow:color_inactive"]
+                                            : byName["decoration:shadow:color"]),
       // Where Hyprland moves the shadow from under the window, in logical
       // pixels: a theme that drops it a little below has to be matched, or
       // the shadow jumps as the windows take back over.
