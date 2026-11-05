@@ -391,10 +391,9 @@ sync_all() {
 
 # Since Omarchy 4.5 the service keeps its rows in two files rather than one file
 # per popup; quiet.json holds do-not-disturb. Each row goes through ingest_file
-# as the single-popup record it would once have been. The key is built from the
-# row's arrival time and id, not the service's own key, so a row keeps its archive
-# entry as it moves from live to history. rawBody is what the sender sent, which
-# is where a browser's origin still is: the service empties it when it matches.
+# as the single-popup record it would once have been, under a key in the archive's
+# own <ms>-<id> form. rawBody is what the sender sent, which is where a browser's
+# origin still is: the service empties it when it matches.
 ingest_source() {
   local file=$1 name scratch row key
   name=$(basename -- "$file")
@@ -416,10 +415,17 @@ ingest_source() {
     ingest_file "$scratch/$key.json" || { rm -rf -- "$scratch"; return 1; }
     rm -f -- "$scratch/$key.json"
   done < <(jq -c '
+      def base36: explode | reduce .[] as $c (0; . * 36 + (if $c >= 97 then $c - 87 else $c - 48 end));
       if type == "array" then .[] else empty end
       | select(type == "object" and (.ts | type) == "number" and .ts > 0)
       | (.ts * 1000 | floor) as $ms
-      | . + { key: "\($ms)-\(.originalId // 0 | floor)", timestamp: $ms,
+      # The service writes "n", its clock in base 36, then a counter. ts moves when
+      # a sender updates a notification and the key does not, so the key says which
+      # notification this is. A key in any other form falls back to ts.
+      | (if (.key | type) == "string" and (.key | test("^n[0-9a-z]{8}[0-9a-z]+$"))
+         then "\(.key[1:9] | base36)-\(.key[9:] | base36)"
+         else "\($ms)-\(.originalId // 0 | floor)" end) as $key
+      | . + { key: $key, timestamp: $ms,
               body: (if (.rawBody // "") != "" then .rawBody else (.body // "") end) }
     ' "$file" 2>/dev/null)
   rm -rf -- "$scratch"
