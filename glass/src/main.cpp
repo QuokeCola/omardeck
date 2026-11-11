@@ -46,7 +46,14 @@ static SP<ITexture>   g_pendingShape;          // surface texture whose alpha de
 static float          g_pendingCut = 0.F;
 static SP<CShader>    g_shader;
 static bool           g_shaderFailed = false;
-static std::map<std::string, uint64_t> g_stats;  // glass draws per surface, for `hyprctl liquidglass`
+// Draw counts for `hyprctl liquidglass`, per outcome and surface. A layer's
+// namespace is whatever its client says it is, so the keys are a client's to
+// make up: the map only ever holds STATS_MAX of them, each with at most
+// STATS_NAME_MAX bytes of namespace, and the rest are counted together.
+static constexpr size_t                STATS_MAX      = 64;
+static constexpr size_t                STATS_NAME_MAX = 48;
+static std::map<std::string, uint64_t> g_stats;
+static uint64_t                        g_statsOther = 0, g_statsUnmatched = 0, g_statsDrawn = 0;
 static SP<SHyprCtlCommand>             g_ctlCmd;
 
 static struct {
@@ -243,8 +250,17 @@ static void drawGlass(CHyprOpenGLImpl* gl, SP<ITexture> tex, const CBox& box, co
 
 static std::string surfaceLabel(const STexData& data) {
     if (const auto ls = data.currentLS.lock())
-        return "layer:" + ls->m_namespace;
+        return "layer:" + ls->m_namespace.substr(0, STATS_NAME_MAX);
     return "window";
+}
+
+static void countStat(std::string key) {
+    if (const auto it = g_stats.find(key); it != g_stats.end())
+        it->second++;
+    else if (g_stats.size() < STATS_MAX)
+        g_stats.emplace(std::move(key), 1);
+    else
+        g_statsOther++;
 }
 
 // A layer that covers its monitor (menus, panels with scrims) draws a card
@@ -267,12 +283,12 @@ static void hkRenderTextureWithBlurInternal(CHyprOpenGLImpl* thisptr, SP<ITextur
         } else
             glass = false;
     }
-    g_stats[(glass ? (g_pendingShape ? "shape " : "glass ") : (data.blurredBG ? "skip " : "nobg ")) + surfaceLabel(data)]++;
+    countStat((glass ? (g_pendingShape ? "shape " : "glass ") : (data.blurredBG ? "skip " : "nobg ")) + surfaceLabel(data));
     if (glass)
         g_pendingBG = data.blurredBG.get();
     ((FnBlur)g_hookBlur->m_original)(thisptr, tex, box, data);
     if (g_pendingBG)
-        g_stats["unmatched"]++;  // the original never drew blurredBG through renderTextureInternal
+        g_statsUnmatched++;  // the original never drew blurredBG through renderTextureInternal
     g_pendingBG = nullptr;
     g_pendingShape.reset();
 }
@@ -280,13 +296,7 @@ static void hkRenderTextureWithBlurInternal(CHyprOpenGLImpl* thisptr, SP<ITextur
 static void hkRenderTextureInternal(CHyprOpenGLImpl* thisptr, SP<ITexture> tex, const CBox& box, const STexData& data) {
     if (g_pendingBG && tex.get() == g_pendingBG) {
         g_pendingBG = nullptr;  // only the background pass, never the window itself
-        g_stats["drawn"]++;
-        if (const auto ls = data.currentLS.lock()) {
-            CRegion clip = data.clipRegion;
-            auto ext = clip.getExtents();
-            g_stats[std::format("box {} {:.0f},{:.0f} {:.0f}x{:.0f} a={:.2f} discard={}@{:.3f} clip={} {:.0f},{:.0f} {:.0f}x{:.0f} mon={}", ls->m_namespace, box.x, box.y, box.width, box.height, data.a, (int)data.discardMode, data.discardOpacity,
-                                clip.empty() ? "none" : "set", ext.x, ext.y, ext.width, ext.height, g_pHyprRenderer->m_renderData.pMonitor->m_name)]++;
-        }
+        g_statsDrawn++;
         drawGlass(thisptr, tex, box, data, g_pendingShape, g_pendingCut);
         return;
     }
@@ -381,8 +391,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         for (const auto& m : State::monitorState()->monitors())
             g_pHyprRenderer->damageMonitor(m);  // config changes don't damage; repaint so tweaks show
         std::string out = std::format("shader: {}\n", g_shader ? "ok" : (g_shaderFailed ? "FAILED" : "not built yet"));
+        out += std::format("{:>10}  drawn\n{:>10}  unmatched\n", g_statsDrawn, g_statsUnmatched);
         for (const auto& [k, v] : g_stats)
             out += std::format("{:>10}  {}\n", v, k);
+        if (g_statsOther)
+            out += std::format("{:>10}  (other surfaces, past the first {})\n", g_statsOther, STATS_MAX);
         return out;
     }});
 
@@ -394,6 +407,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_reloadListener.reset();
     restoreBlur();
     g_pendingBG = nullptr;
+    g_stats.clear();
     if (g_shader)
         g_shader->destroy();
     g_shader.reset();
