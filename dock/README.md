@@ -36,7 +36,7 @@ Enable by adding `{ "id": "quokecola.dock" }` to `plugins` in
 }
 ```
 
-`autohide`: `smart`, `always` or `never`. `magnify`: hovered-icon scale, `1` turns it off. `height` sets the panel height
+`autohide`: `smart`, `always` or `never`. With `never` the dock keeps its strip of the screen, so tiled windows stop above it, and it hides only for a fullscreen window. `magnify`: hovered-icon scale, `1` turns it off. `height` sets the panel height
 independently of `iconSize`.
 
 The dock announces how much of each screen's bottom edge it covers on

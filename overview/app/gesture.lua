@@ -214,7 +214,10 @@ end
 -- bar turns that off. Once per Lua state; a config reload drops it and this
 -- file runs again.
 if not _G.__aerial_layer then
-  hl.layer_rule({ match = { namespace = "^omarchy-aerial$" }, no_anim = true, animation = "none" })
+  -- And first in its layer, which is the bar's (see Surface.qml): Hyprland draws a
+  -- layer's surfaces from the highest order up, so the bar stays above the overview
+  -- as it stays above the windows.
+  hl.layer_rule({ match = { namespace = "^omarchy-aerial$" }, no_anim = true, animation = "none", order = 1 })
   -- The overview's settings and the notification center animate themselves
   -- too, and are frosted: blurred behind wherever they are see-through, which
   -- they are only with frosted glass on.

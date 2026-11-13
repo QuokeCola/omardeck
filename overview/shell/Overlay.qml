@@ -312,6 +312,12 @@ Scope {
       const alpha = root.alphas[top.address]
       const tags = (top.lastIpcObject || {}).tags || []
       const tagged = tags.some(t => String(t).replace(/\*$/, "") === "default-opacity")
+      // A titlebar above it (see `bars` in Service.qml), which Hyprland leaves out
+      // of the window's own rectangle. Not on a fullscreen window; a maximized one
+      // keeps it.
+      const deco = root.deco
+      const barred = deco.bars === true && ((top.lastIpcObject || {}).fullscreen || 0) < 2
+                  && (deco.barTag === "" || tags.some(t => String(t).replace(/\*$/, "") === deco.barTag))
       const entry = root.kept(before[top.address], {
         x: rect.x - mon.x,
         y: rect.y - mon.y,
@@ -323,6 +329,7 @@ Scope {
         // Omarchy turns the global shadow on for floating workspaces and opts
         // every other window out, so the option alone doesn't say who has one.
         shadow: alpha ? alpha.shadow : false,
+        bar: barred ? deco.barHeight : 0,
       })
       if (entry !== before[top.address]) changed = true
       out[top.address] = entry
@@ -1177,6 +1184,19 @@ Scope {
     const entry = DesktopEntries.heuristicLookup(appId)
     const name = root.iconName(entry && entry.icon ? entry.icon : appId)
     return name ? (Quickshell.iconPath(name, true) || "") : ""
+  }
+
+  /** What Omarchy's titlebar says for a window of this class: the name of the app
+      that claims it, as omarchy-hyprland-titlebars works it out (appName.cpp) --
+      the desktop entry whose StartupWMClass is the class, or failing that whose id
+      is, whatever the case. "" when none does, and the bar shows the window's title. */
+  function appNameFor(appId) {
+    if (!appId) return ""
+    const entries = DesktopEntries.applications.values || []
+    for (const entry of entries) if (entry.startupClass === appId && entry.name) return entry.name
+    const wanted = String(appId).toLowerCase()
+    for (const entry of entries) if (String(entry.id).toLowerCase() === wanted && entry.name) return entry.name
+    return ""
   }
 
   // ------------------------------------------------------------ acting on it

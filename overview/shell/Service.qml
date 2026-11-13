@@ -421,6 +421,18 @@ Item {
     glassLightAngle: 225,
     glassBrightness: 1.04,
     glassSaturation: 1.15,
+    // The titlebars Omarchy puts on floating workspaces' windows (hyprbars), when
+    // that plugin is loaded. `barTag` is the window tag that gets one; "" is all.
+    bars: false,
+    barHeight: 0,
+    barColor: "transparent",
+    barText: "transparent",
+    barTextSize: 12,
+    barFont: "monospace",
+    barPadding: 10,
+    barButtonPadding: 8,
+    barTitle: true,
+    barTag: "",
   })
 
   readonly property var decoOptions: [
@@ -440,6 +452,12 @@ Item {
     "plugin:liquidglass:dispersion", "plugin:liquidglass:specular",
     "plugin:liquidglass:light_angle", "plugin:liquidglass:brightness",
     "plugin:liquidglass:saturation",
+    // Likewise: no plugin, no titlebars.
+    "plugin:hyprbars:enabled", "plugin:hyprbars:bar_height",
+    "plugin:hyprbars:bar_color", "plugin:hyprbars:col.text",
+    "plugin:hyprbars:bar_text_size", "plugin:hyprbars:bar_text_font",
+    "plugin:hyprbars:bar_padding", "plugin:hyprbars:bar_button_padding",
+    "plugin:hyprbars:bar_title_enabled", "plugin:hyprbars:workspace_tag",
   ]
 
   Process {
@@ -459,6 +477,12 @@ Item {
     // "143a332a0deg": the colour is the first eight hex digits either way.
     const hex = /^\s*([0-9a-fA-F]{8})/.exec(String(raw || ""))
     return hex ? "#" + hex[1] : "transparent"
+  }
+
+  // A plugin's colours come back as one number, AARRGGBB.
+  function intColourOf(entry) {
+    if (!entry || typeof entry.int !== "number") return service.colourOf(entry)
+    return "#" + (entry.int >>> 0).toString(16).padStart(8, "0")
   }
 
   function vecOf(entry, i) {
@@ -522,6 +546,17 @@ Item {
       glassLightAngle: or("plugin:liquidglass:light_angle", 225),
       glassBrightness: or("plugin:liquidglass:brightness", 1.04),
       glassSaturation: or("plugin:liquidglass:saturation", 1.15),
+      bars: on("plugin:hyprbars:enabled") && num("plugin:hyprbars:bar_height") > 0,
+      barHeight: Math.max(0, num("plugin:hyprbars:bar_height")),
+      barColor: service.intColourOf(byName["plugin:hyprbars:bar_color"]),
+      barText: service.intColourOf(byName["plugin:hyprbars:col.text"]),
+      barTextSize: or("plugin:hyprbars:bar_text_size", 12),
+      barFont: (byName["plugin:hyprbars:bar_text_font"] || {}).str || "monospace",
+      barPadding: or("plugin:hyprbars:bar_padding", 10),
+      barButtonPadding: or("plugin:hyprbars:bar_button_padding", 8),
+      // Hyprland's default is on; unset, it reads as that.
+      barTitle: !byName["plugin:hyprbars:bar_title_enabled"] || on("plugin:hyprbars:bar_title_enabled"),
+      barTag: (byName["plugin:hyprbars:workspace_tag"] || {}).str || "",
     }
   }
 

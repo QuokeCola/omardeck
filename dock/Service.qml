@@ -18,7 +18,9 @@ import qs.Ui
 //   iconSize  px at rest
 //   height    panel height in px (independent of iconSize)
 //   magnify   hovered icon scale (1 = off)
-//   autohide  "smart" (hide when a window overlaps), "always", "never"
+//   autohide  "smart" (hide when a window overlaps), "always", "never" (always
+//             there: the dock keeps its strip of the screen to itself, so tiled
+//             windows stop short of it; it steps aside only for a fullscreen one)
 //   slideToWindow  clicking an app whose one window is on another desktop:
 //             true (default) has Aerial slide there; false switches at once
 //   windowPicker  clicking an app with several windows: "aerial" opens
@@ -515,7 +517,7 @@ Item {
         // Tiled/fullscreen and floating windows counted apart: only floating
         // ones move without an event (see the poll timer).
         readonly property var coverage: {
-          var out = { fixed: false, floating: false, floatingHere: false }
+          var out = { fixed: false, floating: false, floatingHere: false, fullscreen: false }
           var mon = panel.monitor
           if (!mon) return out
           var ws = mon.activeWorkspace ? mon.activeWorkspace.id : -999
@@ -531,6 +533,8 @@ Item {
             var fixed = !c.floating || !!c.fullscreen
             if (!fixed) out.floatingHere = true
             if (c.hidden) continue
+            // Really fullscreen, not maximized: that one stops at the dock's strip.
+            if (c.fullscreen >= 2) out.fullscreen = true
             if (c.fullscreen || (c.at[0] < right && c.at[0] + c.size[0] > left && c.at[1] < bottom && c.at[1] + c.size[1] > top)) {
               if (fixed) out.fixed = true
               else out.floating = true
@@ -544,7 +548,9 @@ Item {
         property bool hovered: false
         property bool lingering: false
         property string menuKey: ""
+        // Never hiding still gives way to a fullscreen window, as the bar does.
         readonly property bool wantHidden: root.autohide === "always" || (root.autohide === "smart" && overlapped)
+                                           || (root.autohide === "never" && coverage.fullscreen)
         readonly property bool revealed: !wantHidden || hovered || lingering || menuKey !== "" || dragUid >= 0
 
         onHoveredChanged: if (!hovered) { lingering = true; lingerTimer.restart() }
@@ -564,7 +570,12 @@ Item {
                                                   && hyprMonitor.activeWorkspace.hasFullscreen)
         visible: root.items.length > 0 && !root.remapping && !(fullscreenHere && !revealed && !slider.visible)
         color: "transparent"
-        exclusionMode: ExclusionMode.Ignore
+        // Always there, the dock has its strip to itself: Hyprland lays tiled and
+        // maximized windows out above it. The same whether or not it is on screen
+        // just now, so a fullscreen window coming and going doesn't re-lay the desktop.
+        readonly property bool keepsStrip: root.autohide === "never"
+        exclusionMode: panel.keepsStrip ? ExclusionMode.Normal : ExclusionMode.Ignore
+        exclusiveZone: panel.keepsStrip ? Math.ceil(root.edgeGap + root.dockHeight) : 0
         WlrLayershell.namespace: "omarchy-dock"
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.None

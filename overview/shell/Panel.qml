@@ -29,7 +29,11 @@ Panel {
   readonly property bool frost: root.setting("frost", true) !== false
   readonly property bool deskSwipe: root.setting("deskSwipe", true) !== false
   readonly property bool syncScreens: root.setting("syncScreens", false) === true
-  readonly property bool liquidGlass: root.setting("liquidGlass", false) === true
+  // Under frosted glass: the overview's cards and these panels only bend what the
+  // frost blurs, so without it the glass would be on in some places and not others.
+  // What was chosen is kept, and comes back with the frost.
+  readonly property bool liquidGlassChosen: root.setting("liquidGlass", false) === true
+  readonly property bool liquidGlass: root.frost && root.liquidGlassChosen
 
   function setSetting(key, value) {
     const next = Object.assign({}, root.settings || {})
@@ -340,16 +344,21 @@ Panel {
         }
 
         Toggle {
-          width: parent.width
+          // A step in, under the switch it depends on, and out of reach without it.
+          x: Style.spacing.rowPaddingX * 2
+          width: parent.width - x
+          enabled: root.frost
+          opacity: root.frost ? 1 : 0.45
           label: "Liquid glass"
           readonly property string glassState: root.service ? root.service.glassState : "off"
-          description: glassState === "working" ? "Starting… the first time, and after Hyprland updates, it is built for your Hyprland, which takes a few seconds."
+          description: !root.frost ? "Needs frosted glass."
+                     : glassState === "working" ? "Starting… the first time, and after Hyprland updates, it is built for your Hyprland, which takes a few seconds."
                      : glassState === "error" ? root.service.glassError
                      : "Whatever Hyprland blurs bends like glass at its edges: see-through windows, the bar, the dock, these panels and the overview's cards. Turns Hyprland's blur down while on."
           checked: root.liquidGlass
           foreground: root.bar.foreground
           fontFamily: root.bar.fontFamily
-          onClicked: root.setSetting("liquidGlass", !root.liquidGlass)
+          onClicked: root.setSetting("liquidGlass", !root.liquidGlassChosen)
         }
 
         Toggle {

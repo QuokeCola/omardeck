@@ -155,7 +155,7 @@ dragging it, writes it for you. See
 | `iconSize` | `38` | icon size in pixels |
 | `height` | `63` | dock height in pixels |
 | `magnify` | `1.45` | hovered icon scale; `1` turns it off |
-| `autohide` | `"smart"` | `"smart"` hides only while a window covers the dock; `"always"`, `"never"` |
+| `autohide` | `"smart"` | `"smart"` hides only while a window covers the dock; `"always"`; `"never"` keeps it up and has tiled windows stop above it |
 | `slideToWindow` | `true` | the overview slides to a window on another desktop; `false` switches at once |
 | `windowPicker` | `"aerial"` | an app with several windows opens the overview on them; `"cycle"` focuses them in turn |
 | `classAliases` | `{}` | `{"<regex on window class>": "<desktop id>"}` for apps whose window class matches no desktop file |

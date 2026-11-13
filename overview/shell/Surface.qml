@@ -36,7 +36,10 @@ PanelWindow {
                                             && surface.monitor.activeWorkspace.hasFullscreen)
   color: "transparent"
   WlrLayershell.namespace: "omarchy-aerial"
-  WlrLayershell.layer: WlrLayer.Overlay
+  // Under the bar, which stays where it is on the desktop: above the windows, and
+  // so above their cards. Over a fullscreen window nothing on that layer shows, the
+  // bar included, so there it is on the one above.
+  WlrLayershell.layer: surface.fullscreenHere ? WlrLayer.Overlay : WlrLayer.Top
   exclusionMode: ExclusionMode.Ignore
   anchors { top: true; bottom: true; left: true; right: true }
 
@@ -1390,6 +1393,13 @@ PanelWindow {
         readonly property int pxH: Math.round(card.height * surface.hyprScale)
         readonly property real pxRound: card.radius * surface.hyprScale
         readonly property real dressedAway: 1 - overlay.dress
+        // The window's titlebar, above the card and outside its own rectangle, as it
+        // is on the desktop: as tall as the card is scaled. Border and shadow go
+        // round both.
+        readonly property real barH: card.real.bar > 0 && card.real.w > 0
+                                     ? card.real.bar * card.width / card.real.w : 0
+        readonly property int pxBar: Math.round(card.barH * surface.hyprScale)
+        readonly property int pxTall: card.pxH + card.pxBar
 
         ShaderEffect {
           id: shadowEffect
@@ -1398,16 +1408,16 @@ PanelWindow {
           readonly property int spread: Math.floor(overlay.deco.shadowRange * surface.hyprScale)
           readonly property color tint: card.focusedWindow ? overlay.deco.shadowColor : overlay.deco.shadowColorInactive
           x: -reach / surface.hyprScale + overlay.deco.shadowOffsetX
-          y: -reach / surface.hyprScale + overlay.deco.shadowOffsetY
+          y: -reach / surface.hyprScale + overlay.deco.shadowOffsetY - card.barH
           width: (card.pxW + 2 * reach) / surface.hyprScale
-          height: (card.pxH + 2 * reach) / surface.hyprScale
+          height: (card.pxTall + 2 * reach) / surface.hyprScale
           z: -1
           opacity: card.dressedAway
           visible: overlay.deco.shadow && card.real.shadow === true && spread > 0 && opacity > 0.01 && !card.dragging
           property vector4d color: Qt.vector4d(tint.r, tint.g, tint.b, tint.a)
-          property vector2d fullSize: Qt.vector2d(card.pxW + 2 * reach, card.pxH + 2 * reach)
+          property vector2d fullSize: Qt.vector2d(card.pxW + 2 * reach, card.pxTall + 2 * reach)
           property vector2d topLeft: Qt.vector2d(spread + corner, spread + corner)
-          property vector2d bottomRight: Qt.vector2d(card.pxW + 2 * reach - (spread + corner), card.pxH + 2 * reach - (spread + corner))
+          property vector2d bottomRight: Qt.vector2d(card.pxW + 2 * reach - (spread + corner), card.pxTall + 2 * reach - (spread + corner))
           property real radius: corner
           property real range: spread
           property real shadowPower: overlay.deco.shadowPower
@@ -1419,14 +1429,14 @@ PanelWindow {
           readonly property int thickness: Math.round(overlay.deco.border * surface.hyprScale)
           readonly property color tint: card.focusedWindow ? overlay.deco.activeBorder : overlay.deco.inactiveBorder
           x: -thickness / surface.hyprScale
-          y: -thickness / surface.hyprScale
+          y: -thickness / surface.hyprScale - card.barH
           width: (card.pxW + 2 * thickness) / surface.hyprScale
-          height: (card.pxH + 2 * thickness) / surface.hyprScale
+          height: (card.pxTall + 2 * thickness) / surface.hyprScale
           z: -1
           opacity: card.dressedAway
           visible: thickness > 0 && opacity > 0.01 && !card.dragging
           property vector4d color: Qt.vector4d(tint.r, tint.g, tint.b, tint.a)
-          property vector2d fullSize: Qt.vector2d(card.pxW + 2 * thickness, card.pxH + 2 * thickness)
+          property vector2d fullSize: Qt.vector2d(card.pxW + 2 * thickness, card.pxTall + 2 * thickness)
           property real radius: card.pxRound > 0 ? card.pxRound + thickness : 0
           property real radiusOuter: (card.radius + overlay.deco.border) * surface.hyprScale
           property real thick: thickness
@@ -1593,10 +1603,13 @@ PanelWindow {
           }
         }
 
+        CardTitlebar { card: card; overlay: surface.overlay }
+
         // Hairline at rest, accent ring under the pointer, bright ring for a
         // window something is about to be dropped onto.
         Rectangle {
           anchors.fill: parent
+          anchors.topMargin: -card.barH
           radius: card.radius
           color: "transparent"
           // In a tile it is a miniature, not a card you can pick: the tile's
