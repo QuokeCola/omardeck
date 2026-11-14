@@ -40,6 +40,69 @@ function unreadState(entries, lastSeen) {
   }
 }
 
+function isUnread(entry, readMark) {
+  var timestamp = Number(entry && entry.timestamp)
+  var boundary = Number(readMark)
+  return isFinite(timestamp) && timestamp > (isFinite(boundary) ? boundary : 0)
+}
+
+// "" for an ordinary notification. A critical one is "unread" until the sheet has
+// been opened on it, then "read": still labelled, no longer shouting.
+function criticalState(entry, readMark) {
+  if (!entry || Number(entry.urgency) !== CRITICAL_URGENCY) return ""
+  return isUnread(entry, readMark) ? "unread" : "read"
+}
+
+function criticalLabel(entry, readMark) {
+  return criticalState(entry, readMark) ? "CRITICAL" : ""
+}
+
+// What a stack's heading says beside its time: how many are new, and how many
+// critical cards the fold is hiding that have not been read. The front card
+// carries its own label, so it does not count.
+function stackTags(group, readMark, expanded) {
+  var rows = group && Array.isArray(group.entries) ? group.entries : []
+  var fresh = 0, hiddenCritical = 0
+  for (var i = 0; i < rows.length; i++) {
+    if (!isUnread(rows[i], readMark)) continue
+    fresh++
+    if (!expanded && i > 0 && Number(rows[i].urgency) === CRITICAL_URGENCY) hiddenCritical++
+  }
+  return {
+    fresh: fresh ? (rows.length > 1 ? fresh + " new" : "new") : "",
+    critical: hiddenCritical ? hiddenCritical + " critical" : ""
+  }
+}
+
+// A second press this soon is the same gesture as the first (a double click, or a
+// key repeating), not an answer to the question it just raised.
+var CONFIRM_GUARD_MS = 300
+
+function confirmSettled(armedAt, now) {
+  return Number(now) - Number(armedAt) >= CONFIRM_GUARD_MS
+}
+
+// Only a removal of more than one notification asks first.
+function removalNeedsConfirm(group) {
+  return !!group && Array.isArray(group.entries) && group.entries.length > 1
+}
+
+function clearAllQuestion(count) {
+  return { message: "Clear all " + count + (count === 1 ? " notification?" : " notifications?"), action: "Clear" }
+}
+
+function dismissStackQuestion(label, count) {
+  return { message: "Dismiss all " + count + " from " + label + "?", action: "Dismiss" }
+}
+
+// The line an empty sheet shows, once it has something true to say.
+function emptyCopy(loaded, filter, error) {
+  if (filter) return "Nothing matches \u201C" + filter + "\u201D"
+  if (error && !loaded) return "History unavailable"
+  if (!loaded) return "Reading the archive\u2026"
+  return "No notifications"
+}
+
 function relativeTime(timestamp, now) {
   var minutes = Math.floor(Math.max(0, now - timestamp) / 60000)
   if (minutes < 1) return "now"
@@ -146,6 +209,16 @@ if (typeof module !== "undefined") {
     fileCommand: fileCommand,
     CRITICAL_URGENCY: CRITICAL_URGENCY,
     unreadState: unreadState,
+    isUnread: isUnread,
+    criticalState: criticalState,
+    criticalLabel: criticalLabel,
+    stackTags: stackTags,
+    CONFIRM_GUARD_MS: CONFIRM_GUARD_MS,
+    confirmSettled: confirmSettled,
+    removalNeedsConfirm: removalNeedsConfirm,
+    clearAllQuestion: clearAllQuestion,
+    dismissStackQuestion: dismissStackQuestion,
+    emptyCopy: emptyCopy,
     relativeTime: relativeTime,
     groupsFor: groupsFor,
     stackRows: stackRows,

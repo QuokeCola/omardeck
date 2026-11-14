@@ -39,8 +39,8 @@ by foamrider. See [Credits](#credits).
 
 ## Install
 
-Needs Omarchy with Hyprland's Lua configuration, plus `jq`, `wl-paste`,
-GNU `timeout`, `inotify-tools`, `file` and ImageMagick 7 (`magick`) for the
+Needs Omarchy with Hyprland's Lua configuration, plus `jq`,
+GNU `timeout`, `setpriv`, `inotify-tools`, `file` and ImageMagick 7 (`magick`) for the
 notification center.
 
 ```sh

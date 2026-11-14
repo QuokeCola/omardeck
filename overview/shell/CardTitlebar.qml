@@ -6,13 +6,13 @@ import QtQuick
 // without it, so it vanished as the overview opened.
 //
 // Laid out at the window's own size from what the plugin was told (see `bars` in
-// Service.qml) and scaled with the card. Only to look at: the card's own close
+// app/Deco.js) and scaled with the card. Only to look at: the card's own close
 // button and drag do the work.
 Item {
   id: bar
 
   required property var card
-  required property var overlay
+  readonly property var overlay: card.overlay
   readonly property var deco: bar.overlay.deco
 
   // The plugin's buttons, right to left. Omarchy's three (see

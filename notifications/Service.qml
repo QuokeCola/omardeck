@@ -67,24 +67,25 @@ Item {
 
   property string focusError: ""
   property var focusEntry: null
-  property bool invokingDefault: false
   property bool openingFile: false
   signal focusCompleted()
 
-  function focusNotification(row, useDefault) {
+  // Auto opens the picture a row is about and otherwise focuses its sender;
+  // withFile === false always focuses the sender. Archived sender commands are never run.
+  function focusNotification(row, withFile) {
     if (focusProc.running || !row || !/^[0-9]+-[0-9]+$/.test(String(row.key))) return
     focusError = ""
     focusEntry = row
     openingFile = false
-    if (useDefault === false) { focusSendingApp(); return }
-    invokingDefault = true
-    // Probe the running daemon, not an installed plugin that may be disabled.
-    focusProc.command = ["omarchy-shell", "foamy.notifications", "invokeDefault", String(row.key)]
+    var command = withFile === false ? null : Model.fileCommand(row)
+    if (!command) { focusSendingApp(); return }
+    openingFile = true
+    var helper = decodeURIComponent(Qt.resolvedUrl("bin/open-notification-image").toString().replace(/^file:\/\//, ""))
+    focusProc.command = ["bash", helper, command[0] === "tensaku-edit" ? "edit-screenshot" : "view-image", command[1]]
     focusProc.running = true
   }
 
   function focusSendingApp() {
-    invokingDefault = false
     // The stock helper treats names as regexes; allow only literal app names.
     if (!/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/.test(focusEntry.app)) {
       focusError = "Could not identify the sending app."
@@ -97,33 +98,8 @@ Item {
     focusProc.running = true
   }
 
-  function finishFocus(exitCode, exitStatus, output) {
-    var succeeded = exitCode === 0 && exitStatus === 0
-    if (invokingDefault) {
-      var result = String(output || "").trim()
-      if (succeeded && result === "busy") {
-        focusError = "This notification is already being opened. Try again."
-        focusEntry = null
-        return
-      }
-      if (!succeeded || result !== "invoked") {
-        // Live sender actions take priority; archived pictures use a fixed opener.
-        var command = Model.fileCommand(focusEntry)
-        if (command) {
-          invokingDefault = false
-          openingFile = true
-          var helper = decodeURIComponent(Qt.resolvedUrl("bin/open-notification-image").toString().replace(/^file:\/\//, ""))
-          focusProc.command = ["bash", helper, command[0] === "tensaku-edit" ? "edit-screenshot" : "view-image", command[1]]
-          focusProc.running = true
-        } else focusSendingApp()
-        return
-      }
-      // The daemon owns durable handling of its callback and acknowledges removal.
-      root.focusCompleted()
-      focusEntry = null
-      return
-    }
-    if (succeeded) { root.remove(focusEntry.key); root.focusCompleted() }
+  function finishFocus(exitCode, exitStatus) {
+    if (exitCode === 0 && exitStatus === 0) { root.remove(focusEntry.key); root.focusCompleted() }
     else if (!openingFile && exitCode === 3 && exitStatus === 0) {
       // Background senders often have no window; retain history without an error.
       focusError = ""
@@ -137,9 +113,9 @@ Item {
 
   Process {
     id: focusProc
-    stdout: StdioCollector { id: focusOutput }
+    stdout: StdioCollector {}
     stderr: StdioCollector {}
-    onExited: function(exitCode, exitStatus) { root.finishFocus(exitCode, exitStatus, focusOutput.text) }
+    onExited: function(exitCode, exitStatus) { root.finishFocus(exitCode, exitStatus) }
   }
 
   signal entryAdded(var entry)
@@ -216,16 +192,10 @@ Item {
         root.removalError = "Could not dismiss notifications. Try again."
         console.warn("Notification dismissal failed:", removeErrors.text)
         root.load()
-      } else root.releaseNotificationActions(root.activeRemovalKeys)
+      }
       root.activeRemovalKeys = []
       root.startRemoval()
     }
-  }
-
-  function releaseNotificationActions(keys) {
-    // Stock and older daemons have no retained actions; cleanup is optional IPC.
-    for (var i = 0; i < keys.length; i += 100)
-      Quickshell.execDetached(["omarchy-shell", "-q", "foamy.notifications", "releaseHistory", keys.slice(i, i + 100).join(",")])
   }
 
   // Ordinary plugins use the public IPC commands, not the bar-only service proxy.
@@ -274,9 +244,7 @@ Item {
   function clearAll() {
     entries = []
     entriesReset()
-    // Release callbacks only after durable clearing, without catching newer arrivals.
-    Quickshell.execDetached(["bash", "-c", '"$1" clear && omarchy-shell -q foamy.notifications releaseHistoryBefore "$2"',
-      "--", root.script, String(Date.now())])
+    Quickshell.execDetached(root.storeCommand(["clear"]))
   }
 
   function absorb(line) {
@@ -315,20 +283,6 @@ Item {
     })
   }
 
-  property bool sourceRestartPending: false
-  FileView {
-    path: (Quickshell.env("XDG_CONFIG_HOME") || Quickshell.env("HOME") + "/.config") + "/omarchy/shell.json"
-    watchChanges: true
-    printErrors: false
-    onFileChanged: {
-      reload()
-      // A daemon switch must re-resolve the source without restarting the center.
-      root.sourceRestartPending = true
-      if (watchProc.running) watchProc.running = false
-      else { restartWatch.interval = 100; restartWatch.restart() }
-    }
-  }
-
   Process {
     id: watchProc
     command: root.storeCommand(["watch"])
@@ -337,16 +291,13 @@ Item {
     stdout: SplitParser {
       onRead: function(line) { root.absorb(line) }
     }
-    onExited: {
-      restartWatch.interval = root.sourceRestartPending ? 100 : 30000
-      restartWatch.restart()
-    }
+    onExited: restartWatch.restart()
   }
 
   Timer {
     id: restartWatch
     interval: 30000
-    onTriggered: { root.sourceRestartPending = false; if (!watchProc.running) watchProc.running = true }
+    onTriggered: if (!watchProc.running) watchProc.running = true
   }
 
   Timer { id: reloadArchive; interval: 75; onTriggered: root.load() }
@@ -406,7 +357,6 @@ Item {
     if (Plugin.ServiceRegistry.instance === root) Plugin.ServiceRegistry.instance = null
   }
 
-  // Popup actions use public IPC because plugins cannot call each other's services.
   IpcHandler {
     // The panel owns quokecola.omardeck.notifications (open/close); the store needs a distinct target.
     target: "quokecola.omardeck.notifications.store"
@@ -416,16 +366,6 @@ Item {
         return typeof key !== "string" || !/^[0-9]+-[0-9]+$/.test(key)
       })) return "error: invalid keys"
       root.removeMany(keys)
-      return "ok"
-    }
-    function handled(keysCsv: string): string {
-      var keys = keysCsv.split(",")
-      if (!Array.isArray(keys) || keys.length > 100 || keys.some(function(key) {
-        return typeof key !== "string" || !/^[0-9]+-[0-9]+$/.test(key)
-      })) return "error: invalid keys"
-      for (var i = 0; i < keys.length; i++) root.removedKeys[keys[i]] = true
-      root.entries = root.visibleEntries(root.entries)
-      root.entriesReset()
       return "ok"
     }
   }

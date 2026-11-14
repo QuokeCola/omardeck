@@ -88,7 +88,7 @@ PanelWindow {
     // from while the next comes in.
     if (!slideIn) { slideProgress = slideTarget; return }
     slideCurve.to = slideTarget
-    slideCurve.duration = open ? 320 : 220
+    slideCurve.duration = Style.duration(open ? 320 : 220)
     slideCurve.start()
   }
 
@@ -146,6 +146,16 @@ PanelWindow {
   // started here carries the sheet the rest of the way.
   function release(toOpen) {
     dragging = false
+    // Following the fingers is the user's own motion and stays. What happens
+    // after they lift is the sheet's, so reduced motion lands it at once.
+    if (Style.reduceMotion) {
+      slideSpring.stop()
+      slideCurve.stop()
+      slideAway.stop()
+      gestureSettling = false
+      slideProgress = toOpen ? 1 : 0
+      return
+    }
     gestureSettling = true
     slideSpring.stop()
     slideCurve.stop()
@@ -154,7 +164,7 @@ PanelWindow {
       slideSpring.to = 1
       slideSpring.start()
     } else {
-      slideAway.duration = Math.max(120, 260 * Math.min(1, slideProgress))
+      slideAway.duration = Style.duration(Math.max(120, 260 * Math.min(1, slideProgress)))
       slideAway.start()
     }
   }
@@ -582,7 +592,7 @@ PanelWindow {
 
     Behavior on opacity {
       enabled: !root.slideIn && !root.popoutSwitching && !root.popoutSwitchClosing
-      NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+      NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutCubic }
     }
 
     // Swallow clicks on the card so they don't bubble to the dismissal
@@ -603,7 +613,7 @@ PanelWindow {
 
       Behavior on opacity {
         enabled: root.popoutSwitching
-        NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+        NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutCubic }
       }
     }
   }

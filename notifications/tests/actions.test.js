@@ -75,31 +75,26 @@ test("sync discards sender commands from live and historical notifications; stac
   assert.equal(state.closed, 0)
 })
 
-test("sync and backfill strip both command fields from old archives and retain only image paths", t => {
+test("sync strips both command fields from old archives and is stable after that", t => {
   const f = fixture(t)
   const timestamp = Date.now()
   const commands = [
     { execArgv: ["bash", "-c", "command"] },
-    { execArgv: JSON.stringify(["viewer", "file:///tmp/image with spaces.webp"]) },
     { exec: "viewer /tmp/legacy.gif" },
-    { file: "https://example.test/picture.png", execArgv: "bad JSON" },
-    { file: "/tmp/run.desktop", execArgv: [] },
     { file: "/tmp/valid.png", exec: "command", execArgv: ["command"] },
   ]
   f.run("list")
-  for (const command of ["sync", "backfill"]) {
-    // Pretty field spacing exercises migration detection in imported archives.
-    const rows = commands.map((fields, i) => ({ key: `${timestamp}-${i}`, timestamp, ...fields }))
-    fs.writeFileSync(f.archive, rows.map(row => JSON.stringify(row).replace(/":/g, '" : ')).join("\n") + "\n")
-    f.run(command)
-    const entries = fs.readFileSync(f.archive, "utf8").trim().split("\n").map(JSON.parse)
-    assertDisarmed(entries)
-    const byKey = new Map(entries.map(row => [row.key, row]))
-    assert.deepEqual(rows.map(row => byKey.get(row.key).file), ["", "/tmp/image with spaces.webp", "/tmp/legacy.gif", "", "", "/tmp/valid.png"])
-    const before = fs.readFileSync(f.archive, "utf8")
-    f.run(command)
-    assert.equal(fs.readFileSync(f.archive, "utf8"), before)
-  }
+  // Pretty field spacing exercises detection in imported archives.
+  const rows = commands.map((fields, i) => ({ key: `${timestamp}-${i}`, timestamp, ...fields }))
+  fs.writeFileSync(f.archive, rows.map(row => JSON.stringify(row).replace(/":/g, '" : ')).join("\n") + "\n")
+  f.run("sync")
+  const entries = fs.readFileSync(f.archive, "utf8").trim().split("\n").map(JSON.parse)
+  assertDisarmed(entries)
+  assert.deepEqual(entries.map(row => row.key), rows.map(row => row.key))
+  assert.equal(entries[2].file, "/tmp/valid.png")
+  const before = fs.readFileSync(f.archive, "utf8")
+  f.run("sync")
+  assert.equal(fs.readFileSync(f.archive, "utf8"), before)
 })
 
 test("execArgv-only archives are automatically disarmed", t => {
@@ -155,7 +150,7 @@ test("only absolute raster paths can reach the fixed opener; click settings stil
   }
 })
 
-test('Center delegates default action and browser focus without replaying archived commands or dismissing early',()=>{
+test('Center delegates browser focus without replaying archived commands or dismissing early',()=>{
  const state=view(),calls=[]
  state.store={focusNotification(row){calls.push(row)}}
  const row={key:'100-1',app:'Vivaldi',body:'teams.microsoft.com',execArgv:'["unsafe"]'}
@@ -165,7 +160,7 @@ test('Center delegates default action and browser focus without replaying archiv
 
 const serviceSource = fs.readFileSync(path.join(__dirname, "../Service.qml"), "utf8")
 function focusService() {
- const state=vm.createContext({focusProc:{running:false},focusEntry:null,focusError:"",invokingDefault:false,openingFile:false,Model,
+ const state=vm.createContext({focusProc:{running:false},focusEntry:null,focusError:"",openingFile:false,Model,
   Qt:{resolvedUrl(path){return "file:///plugin/"+path}},omarchyPath:"/omarchy",removed:[],completed:0,console,
   remove(key){state.removed.push(key)},focusCompleted(){state.completed++}})
  state.root=state
@@ -175,28 +170,18 @@ function focusService() {
  }
  return state
 }
-test("live actions skip focus; missing, stock and older daemons use stock focus",()=>{
- for(const output of ["unavailable","Target not found.","Function not found.",""]) {
-  const state=focusService();state.focusNotification({key:"100-1",app:"Vivaldi"})
-  assert.deepEqual(Array.from(state.focusProc.command),["omarchy-shell","foamy.notifications","invokeDefault","100-1"])
-  state.focusProc.running=false;state.finishFocus(0,0,output)
-  assert.deepEqual(Array.from(state.focusProc.command),["bash","/plugin/bin/focus-notification-app","/omarchy","Vivaldi"])
-  assert.equal(state.removed.length,0)
-  state.focusProc.running=false;state.finishFocus(0,0,"")
-  assert.deepEqual(Array.from(state.removed),["100-1"]);assert.equal(state.completed,1)
- }
+test("a row without a picture focuses its sender and is dismissed once that worked",()=>{
  const state=focusService();state.focusNotification({key:"100-1",app:"Vivaldi"})
- state.focusProc.running=false;state.finishFocus(0,0,"invoked")
- assert.equal(state.invokingDefault,true);assert.equal(state.removed.length,0);assert.equal(state.completed,1)
+ assert.deepEqual(Array.from(state.focusProc.command),["bash","/plugin/bin/focus-notification-app","/omarchy","Vivaldi"])
+ assert.equal(state.removed.length,0)
+ state.focusProc.running=false;state.finishFocus(0,0)
+ assert.deepEqual(Array.from(state.removed),["100-1"]);assert.equal(state.completed,1)
 })
-test("focus failure and busy action retain history; focus-only skips the callback",()=>{
- const state=focusService();state.focusNotification({key:"100-1",app:"Vivaldi"},false)
- assert.equal(state.invokingDefault,false)
- state.focusProc.running=false;state.finishFocus(1,0,"")
- assert.equal(state.removed.length,0);assert.ok(state.focusError)
- state.focusNotification({key:"100-1",app:"Vivaldi"})
- state.focusProc.running=false;state.finishFocus(0,0,"busy")
- assert.equal(state.removed.length,0);assert.equal(state.focusEntry,null);assert.ok(state.focusError)
+test("focus failure retains history; focus-only skips the picture",()=>{
+ const state=focusService();state.focusNotification({key:"100-1",app:"Vivaldi",file:"/tmp/a.png"},false)
+ assert.equal(state.focusProc.command[1],"/plugin/bin/focus-notification-app")
+ state.focusProc.running=false;state.finishFocus(1,0)
+ assert.equal(state.removed.length,0);assert.ok(state.focusError);assert.equal(state.focusEntry,null)
 })
 test("invalid app identity cannot become a stock focus regex",()=>{
  const state=focusService();state.focusNotification({key:"100-1",app:".*"},false)
@@ -208,7 +193,7 @@ test("invalid app identity cannot become a stock focus regex",()=>{
  test("no window silently retains history and clears stale focus feedback",()=>{
  const state=focusService();state.focusError="old error"
  state.focusNotification({key:"100-1",app:"Background"},false)
- state.focusProc.running=false;state.finishFocus(3,0,"")
+ state.focusProc.running=false;state.finishFocus(3,0)
  assert.equal(state.focusError,"");assert.equal(state.focusEntry,null)
  assert.equal(state.removed.length,0);assert.equal(state.completed,0)
  })
@@ -229,30 +214,25 @@ test("invalid app identity cannot become a stock focus regex",()=>{
  })
 
 
-test("live image actions win; expired screenshots use Tensaku and other pictures use the viewer", () => {
+test("expired screenshots use Tensaku and other pictures use the viewer", () => {
  for (const [fileAction, program] of [["edit-screenshot", "tensaku-edit"], ["", "xdg-open"], ["arbitrary command", "xdg-open"]]) {
   const row = {key:"100-1",app:"omarchy-action",file:"/tmp/image with spaces.png",fileAction,execArgv:'["unsafe"]'}
-  const live = focusService(); live.focusNotification(row)
-  live.focusProc.running=false; live.finishFocus(0,0,"invoked")
-  assert.equal(live.completed,1); assert.equal(live.removed.length,0)
-  const expired = focusService(); expired.focusNotification(row)
-  expired.focusProc.running=false; expired.finishFocus(0,0,"unavailable")
-  assert.deepEqual(Array.from(expired.focusProc.command),["bash","/plugin/bin/open-notification-image",program==="tensaku-edit"?"edit-screenshot":"view-image",row.file])
-  assert.equal(expired.removed.length,0)
-  expired.focusProc.running=false; expired.finishFocus(0,0,"")
-  assert.deepEqual(Array.from(expired.removed),[row.key]); assert.equal(expired.completed,1)
+  const state = focusService(); state.focusNotification(row)
+  assert.deepEqual(Array.from(state.focusProc.command),["bash","/plugin/bin/open-notification-image",program==="tensaku-edit"?"edit-screenshot":"view-image",row.file])
+  assert.equal(state.removed.length,0)
+  state.focusProc.running=false; state.finishFocus(0,0)
+  assert.deepEqual(Array.from(state.removed),[row.key]); assert.equal(state.completed,1)
  }
 })
 test("failed image open retains history for retry, including exit code 3", () => {
  for(const code of [1,3,127]) {
   const state=focusService(); state.focusNotification({key:"100-1",app:"omarchy-action",file:"/tmp/a.png",fileAction:"edit-screenshot"})
-  state.focusProc.running=false; state.finishFocus(1,0,"")
   assert.deepEqual(Array.from(state.focusProc.command),["bash","/plugin/bin/open-notification-image","edit-screenshot","/tmp/a.png"])
-  state.focusProc.running=false; state.finishFocus(code,0,"")
+  state.focusProc.running=false; state.finishFocus(code,0)
   assert.equal(state.removed.length,0); assert.equal(state.completed,0); assert.match(state.focusError,/Could not open the image/)
  }
 })
-test("only a two-argument Tensaku image action survives as a fixed intent, including migration", t => {
+test("only a two-argument Tensaku image action survives as a fixed intent", t => {
  const f=fixture(t),timestamp=Date.now(),file="/tmp/screenshot with spaces.png"
  const commands=[["tensaku-edit",file],["/usr/bin/tensaku-edit",file],["tensaku-edit",file,"extra"],["/tmp/tensaku-edit",file],["bash","-c","tensaku-edit",file],["other-editor",file],["tensaku-edit","/tmp/a.desktop"]]
  for(let i=0;i<commands.length;i++) fs.writeFileSync(path.join(f.source,`${timestamp}-${i}.json`),JSON.stringify({timestamp,app:"omarchy-action",execArgv:JSON.stringify(commands[i])}))
@@ -263,10 +243,6 @@ test("only a two-argument Tensaku image action survives as a fixed intent, inclu
  // Upgrading an unchanged source must add the intent without requiring a new notification.
  fs.writeFileSync(f.archive,rows.map(({fileAction,...row})=>JSON.stringify(row)).join("\n")+"\n")
  f.run("sync"); assert.equal(f.run("list").filter(row=>row.fileAction==="edit-screenshot").length,2)
- // An old archive with argv migrates, while an already disarmed archive cannot guess the editor.
- fs.writeFileSync(f.archive,JSON.stringify({key:`${timestamp}-99`,timestamp,execArgv:JSON.stringify(commands[0])})+"\n")
- f.run("backfill"); rows=f.run("list"); assertDisarmed(rows)
- assert.equal(rows[0].fileAction,"edit-screenshot"); assert.deepEqual(Model.fileCommand(rows[0]),["tensaku-edit",file])
 })
 
 test("fixed image launcher preserves spaces, rejects unsafe paths and reports startup failures without waiting for the editor", t => {

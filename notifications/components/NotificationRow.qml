@@ -3,7 +3,7 @@ import QtQuick.Effects
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
-import "../Translations.js" as Translations
+import "../Model.js" as Model
 
 Item {
   id: root
@@ -28,9 +28,14 @@ Item {
   property bool showBody: true
   property bool showPreview: true
   property double now: 0
-  property string language: "en"
   property color foreground: Commons.Color.foreground
   property string fontFamily: Style.font.family
+  // Holographic theme. Off is the plain look, untouched.
+  property bool holo: false
+  // Copy reads in this family; measurements and labels stay in fontFamily.
+  property string copyFamily: fontFamily
+  // Anything newer than this was not read before the sheet was opened.
+  property double readMark: 0
   signal clicked()
   signal removeRequested()
   signal pointerUsed()
@@ -40,6 +45,14 @@ Item {
   // what is under them: the theme's popup colour, without its alpha.
   readonly property color cardFill: Qt.rgba(Commons.Color.popups.background.r, Commons.Color.popups.background.g, Commons.Color.popups.background.b, 1)
   readonly property color urgentFill: Qt.tint(cardFill, Util.alpha(accent, 0.14))
+  readonly property string criticalState: Model.criticalState(entry, readMark)
+  readonly property color dimText: Commons.Color.pick("holo.text-dim", Util.alpha(foreground, 0.6))
+  // Under the holographic theme a critical you have already seen goes quiet: it
+  // keeps its label and its line, and loses the wash. Others keep the wash.
+  function fillFor(row) {
+    return isUrgent(row) && (!holo || Model.isUnread(row, readMark)) ? urgentFill : cardFill
+  }
+  readonly property color restFill: fillFor(entry)
   // Card outlines, likewise opaque: the 18% foreground line pre-blended onto
   // the fill it borders. Folding tucks every card past the second into the
   // same place, and translucent outlines there would add up to a white edge.
@@ -63,7 +76,7 @@ Item {
   property real trailing: !last ? Style.space(6)
     : Style.space(!layered ? 14 : groupEntries.length > 2 ? 24 : 18)
   Behavior on trailing {
-    NumberAnimation { duration: root.layered ? 300 : 340; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.8, 0, 0.2, 1, 1, 1] }
+    NumberAnimation { duration: Style.duration(root.layered ? 300 : 340); easing.type: Easing.BezierSpline; easing.bezierCurve: [0.8, 0, 0.2, 1, 1, 1] }
   }
   implicitHeight: cardHeight + trailing
 
@@ -89,7 +102,7 @@ Item {
       height: Style.space(30)
       y: root.cardHeight + peek - height
       radius: Math.min(Style.space(10), Style.cornerRadius) * s
-      color: root.isUrgent(root.groupEntries[modelData]) ? root.urgentFill : root.cardFill
+      color: root.fillFor(root.groupEntries[modelData])
       border.width: 1
       border.color: root.outline(color)
     }
@@ -99,10 +112,11 @@ Item {
     visible: root.critical
     x: root.markerIn + (root.markerOut - root.markerIn) * root.settle
     width: root.markerWidth
-    radius: width / 2
+    radius: root.holo ? 0 : width / 2
     height: root.cardHeight
     color: root.accent
-    Behavior on color { ColorAnimation { duration: 300 } }
+    opacity: root.holo && root.criticalState === "read" ? 0.5 : 1
+    Behavior on color { ColorAnimation { duration: Style.duration(300) } }
   }
   Item {
     id: card
@@ -112,20 +126,47 @@ Item {
     Rectangle {
       anchors.fill: parent
       radius: Math.min(Style.space(10), Style.cornerRadius)
-      color: root.critical ? root.urgentFill : root.cardFill
+      color: root.holo && cardMouse.pressed ? Qt.tint(root.restFill, Util.alpha(root.foreground, 0.08)) : root.restFill
       border.width: 1
-      border.color: root.outline(color)
-      Behavior on color { ColorAnimation { duration: 300; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.8, 0, 0.2, 1, 1, 1] } }
+      border.color: root.holo && hover.hovered ? Commons.Color.accent : root.outline(color)
+      Behavior on color {
+        enabled: !root.holo || !cardMouse.pressed
+        ColorAnimation { duration: Style.duration(300); easing.type: Easing.BezierSpline; easing.bezierCurve: [0.8, 0, 0.2, 1, 1, 1] }
+      }
+      Behavior on border.color {
+        enabled: root.holo
+        ColorAnimation { duration: Style.duration(120) }
+      }
     }
+    // The keyboard cursor: the theme's selection (a fill and a left rail) under
+    // the holographic theme, an inset outline otherwise.
     Rectangle {
       anchors.fill: parent
-      anchors.margins: Style.space(3)
-      color: "transparent"
-      border.width: root.hasCursor && !root.dismissHasCursor ? 1 : 0
+      anchors.margins: root.holo ? 0 : Style.space(3)
+      visible: root.hasCursor && !root.dismissHasCursor
+      color: root.holo ? Style.selectedFillFor(root.foreground, Commons.Color.accent, Commons.Color.urgent) : "transparent"
+      border.width: root.holo ? 0 : 1
       border.color: Commons.Color.accent
-      radius: Math.min(Style.space(4), Style.cornerRadius)
+      radius: root.holo ? 0 : Math.min(Style.space(4), Style.cornerRadius)
+    }
+    Rectangle {
+      visible: root.holo && root.hasCursor && !root.dismissHasCursor
+      width: Math.max(1, Style.space(2))
+      height: parent.height
+      color: Style.selectedBorderFor(root.foreground, Commons.Color.accent, Commons.Color.urgent)
+    }
+    // Unread, as a shape: a square in the gutter that the text always leaves for it.
+    Rectangle {
+      objectName: "notificationUnreadMark"
+      visible: root.holo && Model.isUnread(root.entry, root.readMark)
+      x: Style.space(6)
+      y: root.verticalPadding + summary.height / 2 - height / 2
+      width: Style.space(7)
+      height: width
+      color: Commons.Color.accent
     }
     MouseArea {
+      id: cardMouse
       anchors.fill: parent
       cursorShape: Qt.PointingHandCursor
       acceptedButtons: Qt.LeftButton | Qt.RightButton
@@ -137,38 +178,63 @@ Item {
     }
     Column {
       id: texts
-      x: Style.space(13)
+      x: Style.space(root.holo ? 19 : 13)
       y: root.verticalPadding
-      width: parent.width - Style.space(26)
+      width: parent.width - x - Style.space(13)
       spacing: Style.space(4)
       // The time shares the subject's line and its space is always kept,
       // so it fades in and out with the stack instead of pushing the card
       // taller. The dismiss button takes its place while hovered.
       Item {
         width: parent.width
-        height: summary.implicitHeight
+        height: Math.max(summary.implicitHeight, criticalTag.visible ? criticalTag.height : 0)
+        // Critical in words, so it holds with the colour gone. Before the summary,
+        // so it survives the elide.
+        Rectangle {
+          id: criticalTag
+          objectName: "notificationCriticalTag"
+          visible: root.holo && root.criticalState !== ""
+          anchors.verticalCenter: summary.verticalCenter
+          width: tagText.implicitWidth + Style.space(8)
+          height: tagText.implicitHeight + Style.space(2)
+          color: root.criticalState === "unread" ? Commons.Color.urgent : "transparent"
+          border.width: root.criticalState === "unread" ? 0 : 1
+          border.color: Qt.alpha(root.dimText, 0.6)
+          Text {
+            id: tagText
+            anchors.centerIn: parent
+            textFormat: Text.PlainText
+            text: Model.criticalLabel(root.entry, root.readMark)
+            color: root.criticalState === "unread" ? root.cardFill : root.dimText
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: root.criticalState === "unread"
+            font.letterSpacing: 0.5
+          }
+        }
         Text {
           id: summary
-          width: parent.width - Math.max(stamp.implicitWidth, Style.space(26)) - Style.space(8)
+          x: criticalTag.visible ? criticalTag.width + Style.space(7) : 0
+          width: parent.width - x - Math.max(stamp.implicitWidth, Style.space(root.holo ? 29 : 26)) - Style.space(8)
           textFormat: Text.PlainText
           text: root.plain(root.entry.summary)
           elide: Text.ElideRight
           maximumLineCount: 1
           color: root.foreground
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.body
+          font.family: root.copyFamily
+          font.pixelSize: root.holo ? Style.font.title : Style.font.body
         }
         Text {
           id: stamp
           anchors.right: parent.right
           anchors.baseline: summary.baseline
           textFormat: Text.PlainText
-          text: Translations.relativeTime(Number(root.entry.timestamp || 0), root.now, root.language)
-          color: Util.alpha(root.foreground, 0.6)
+          text: Model.relativeTime(Number(root.entry.timestamp || 0), root.now)
+          color: root.dimText
           font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
+          font.pixelSize: root.holo ? Style.font.bodySmall : Style.font.caption
           opacity: root.expanded && !(dismissButton.visible && dismissButton.opacity > 0) ? 1 : 0
-          Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+          Behavior on opacity { NumberAnimation { duration: Style.duration(160); easing.type: Easing.OutCubic } }
         }
       }
       Text {
@@ -180,8 +246,8 @@ Item {
         elide: Text.ElideRight
         maximumLineCount: 2
         color: Util.alpha(root.foreground, 0.75)
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
+        font.family: root.copyFamily
+        font.pixelSize: root.holo ? Style.font.body : Style.font.caption
       }
       Image {
         id: previewImage
@@ -218,14 +284,17 @@ Item {
       anchors.right: parent.right
       anchors.rightMargin: Style.space(8)
       y: root.verticalPadding + summary.implicitHeight / 2 - height / 2
-      visible: root.expanded || root.dismissHasCursor
+      // A single card has no stack heading to dismiss it from, so it gets one too.
+      visible: root.expanded || root.dismissHasCursor || (root.holo && !root.layered)
       opacity: hover.hovered || root.hasCursor ? 1 : 0
       iconName: "close"
-      size: Style.space(26)
+      objectName: "notificationCardDismiss"
+      size: Style.space(root.holo ? 29 : 26)
       iconSize: Style.space(14)
       focusable: false
-      tooltipText: Translations.text("Dismiss notification", root.language)
+      tooltipText: "Dismiss notification"
       foreground: root.foreground
+      hoverForeground: root.holo ? Commons.Color.urgent : foreground
       hasCursor: root.dismissHasCursor
       onClicked: { root.pointerUsed(); root.removeRequested() }
     }

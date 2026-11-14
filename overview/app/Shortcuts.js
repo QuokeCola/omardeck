@@ -133,12 +133,31 @@ function conflicts(binds, combo) {
   return out
 }
 
+/** What is wrong with the file's markers, as a sentence for the panel, or "" if
+    nothing is: none at all, or one of each in order. A marker counts wherever it
+    is on a line. Anything else is not ours to guess at, because a save replaces
+    what lies between them. */
+function problem(text) {
+  var begins = text.split(BEGIN).length - 1
+  var ends = text.split(END).length - 1
+  if (begins === 0 && ends === 0) return ""
+  var what = ""
+  if (begins > 1 || ends > 1) what = "more than one Aerial section"
+  else if (ends === 0) what = "\"" + BEGIN + "\" with no \"" + END + "\" after it"
+  else if (begins === 0) what = "\"" + END + "\" with no \"" + BEGIN + "\" before it"
+  else if (text.indexOf(END) < text.indexOf(BEGIN)) what = "the Aerial section's markers the wrong way round"
+  // What follows the end marker would come off its comment and into the Lua.
+  else if (!/^[ \t]*(\r?\n|$)/.test(text.slice(text.indexOf(END) + END.length))) what = "text after \"" + END + "\" on its line"
+  if (what === "") return ""
+  return "Not saved: the bindings file has " + what + ". Nothing was changed; fix the markers by hand and save again."
+}
+
 /** The Aerial section of a bindings file: { actionId: combo }. */
 function read(text) {
   var out = {}
   var start = text.indexOf(BEGIN)
   var end = text.indexOf(END)
-  if (start < 0 || end < start) return out
+  if (start < 0 || problem(text) !== "") return out
   var body = text.slice(start, end).split("\n")
   for (var i = 0; i < body.length; i++) {
     var m = body[i].match(/^\s*o\.bind\(\s*"([^"]+)"\s*,\s*"([^"]+)"/)
@@ -152,10 +171,12 @@ function read(text) {
   return out
 }
 
-/** The section for these shortcuts. A combination something else already
-    has is unbound first — Omarchy's own advice for replacing a binding —
-    or both would fire. */
-function section(shortcuts, takeOver) {
+/** The section for these shortcuts. Every combination is unbound first —
+    Omarchy's own advice for replacing a binding — or whatever else has it would
+    fire too. Always, not only when a clash was seen at save time: read() does not
+    report unbind lines, so a later save could not tell which ones to keep, and
+    gesture.lua already unbinds each of these before it re-applies them. */
+function section(shortcuts) {
   var lines = [
     BEGIN + " — written by the Aerial settings panel; changes here are overwritten there.",
   ]
@@ -163,7 +184,7 @@ function section(shortcuts, takeOver) {
     var act = ACTIONS[a]
     var combo = shortcuts[act.id]
     if (!combo) continue
-    if (takeOver && takeOver[act.id]) lines.push('hl.unbind("' + combo + '")')
+    lines.push('hl.unbind("' + combo + '")')
     lines.push('o.bind("' + combo + '", "' + act.description + '", ' + act.dispatcher + ')')
   }
   lines.push(END)
@@ -171,14 +192,16 @@ function section(shortcuts, takeOver) {
 }
 
 /** The whole file with the section replaced — or added at the end, or
-    removed when there is nothing left in it. */
-function write(text, shortcuts, takeOver) {
+    removed when there is nothing left in it. null, with nothing to write, when
+    problem(text) says the section is malformed. */
+function write(text, shortcuts) {
+  if (problem(text) !== "") return null
   var any = false
   for (var a = 0; a < ACTIONS.length; a++) if (shortcuts[ACTIONS[a].id]) any = true
-  var block = any ? section(shortcuts, takeOver) : ""
+  var block = any ? section(shortcuts) : ""
   var start = text.indexOf(BEGIN)
   var end = text.indexOf(END)
-  if (start >= 0 && end > start) {
+  if (start >= 0) {
     var after = text.slice(end + END.length)
     if (after.charAt(0) === "\n") after = after.slice(1)
     var before = text.slice(0, start)

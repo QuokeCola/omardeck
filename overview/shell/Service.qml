@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
+import "../app/Wire.js" as Wire
 
 // The state the overview is in, and the two ways it gets there.
 //
@@ -21,8 +22,43 @@ Item {
   property var shell: null
   property var manifest: null
 
-  // 0 = closed, 1 = open. Anything between is a swipe in progress.
-  property real t: 0
+  // Who moves `t`: the fingers, or the spring. All of this is OpenGesture's.
+  OpenGesture {
+    id: gesture
+    // Synchronously: the overlay takes its snapshot on this frame.
+    onArmRequested: {
+      service.aim()
+      service.arming()
+      service.refreshModels()
+    }
+    onLanding: (opening) => service.landing(opening)
+  }
+  property alias t: gesture.t
+  property alias open: gesture.open
+  property alias goal: gesture.goal
+  property alias scrub: gesture.scrub
+  property alias everything: gesture.everything
+  property alias scrubFrom: gesture.scrubFrom
+  property alias upFingers: gesture.upFingers
+  property alias handSpeed: gesture.handSpeed
+  property alias lastGoal: gesture.lastGoal
+  property alias lastAt: gesture.lastAt
+  readonly property alias stretch: gesture.stretch
+  readonly property alias chaseSpeed: gesture.chaseSpeed
+  readonly property alias landStiffness: gesture.landStiffness
+  readonly property alias landDamping: gesture.landDamping
+  readonly property alias flickFloor: gesture.flickFloor
+  readonly property alias flickSpeed: gesture.flickSpeed
+  readonly property alias animating: gesture.animating
+  function show() { gesture.show() }
+  function hide() { gesture.hide() }
+  function toggle() { gesture.toggle() }
+  function rubber(value) { return gesture.rubber(value) }
+  function track(goal) { gesture.track(goal) }
+  function glideTo(wantOpen, velocity) { gesture.glideTo(wantOpen, velocity) }
+  function grab() { gesture.grab() }
+  function flicked(fraction, speed) { return gesture.flicked(fraction, speed) }
+
   // Not "visible": Item declares that FINAL, and shadowing it stops the whole
   // plugin loading with "Cannot override FINAL property".
   readonly property bool showing: t > 0.001 || service.deskSlide
@@ -38,13 +74,6 @@ Item {
   // so the desktop dots can sit above it. Bound to the dock by the plugin.
   property var dockCovers: ({})
 
-  // How far up the fingers have pulled the closed overview, 0 to 1, or -1
-  // when no such swipe is under way; and, as they lift, which way it is
-  // headed. For whatever has to make way for it: the notification sheet
-  // slides aside under the same fingers.
-  property real upFingers: -1
-  signal landing(bool opening)
-
   // One app's windows only, from every desktop, when the overview was opened
   // for an app (the dock does, on an icon with several windows). Its app id,
   // lower-cased; "" for the ordinary overview.
@@ -59,37 +88,16 @@ Item {
     service.everything = false
     if (!service.open) service.show()
   }
-  // True once the user has committed: clicks land, keys are grabbed.
-  // With a hysteresis: the spring lands with a bounce, and an overview that
-  // dipped to 0.98 on the rebound must not drop the keyboard and grab it
-  // again — or swap what three fingers sideways mean — on the way.
-  property bool open: false
-  onTChanged: {
-    if (service.t > 0.995) service.open = true
-    else if (service.t < 0.9) service.open = false
-  }
-
-  // Where the fingers have put the overview, which `t` chases. Decisions —
-  // open or not, when they lift — are made on this, not on the spring lagging
-  // behind it.
-  property real goal: 0
 
   // Which monitor the overview belongs to — the one the pointer was on.
   property string monitorName: ""
 
-  // Which gesture currently owns `t`: "", "up", "down", "allup" or "alldown".
-  property string scrub: ""
-  // Three fingers shows this workspace; four shows every window there is.
-  property bool everything: false
-  // Where `t` was when the fingers landed, so a gesture continues from what is
-  // on screen instead of snapping to an end first.
-  property real scrubFrom: 0
-
-  readonly property int fingers: 3
-
   // "Get ready" — raised before `t` leaves zero, so the overlay can take its
   // snapshot of the windows on a frame where nothing is moving yet.
   signal arming()
+  // The fingers lifted from an up swipe, and which way it is headed: the
+  // notification sheet makes way. See `upFingers` in OpenGesture.qml.
+  signal landing(bool opening)
 
   // Three fingers sideways while the overview is open. The overlay owns the
   // workspaces, so it decides what a sideways swipe means; this only relays it.
@@ -115,10 +123,7 @@ Item {
     if (!/^[0-9a-fA-F]+$/.test(key)) return
     if (!service.open) {
       if (service.showing || service.scrub !== "") return
-      service.deskSlide = true
-      service.aim()
-      service.arming()
-      service.refreshModels()
+      service.beginDeskSlide()
     }
     service.jumpRequested(key)
   }
@@ -132,10 +137,7 @@ Item {
     if (!service.open) {
       // Mid-swipe, or half open or closed: not now.
       if (service.showing || service.scrub !== "") return
-      service.deskSlide = true
-      service.aim()
-      service.arming()
-      service.refreshModels()
+      service.beginDeskSlide()
     }
     service.stepRequested(step)
   }
@@ -148,15 +150,20 @@ Item {
     const d = parseInt(n, 10)
     if (!(d >= 1 && d <= 10)) return
     if (!service.open && !service.showing && service.scrub === "") {
-      service.deskSlide = true
-      service.aim()
-      service.arming()
-      service.refreshModels()
+      service.beginDeskSlide()
     }
     service.deskRequested(d)
   }
 
   // ---------------------------------------------------------------- opening
+
+  /** The overview up at no zoom, to slide: snapshot first, as for a swipe. */
+  function beginDeskSlide() {
+    service.deskSlide = true
+    service.aim()
+    service.arming()
+    service.refreshModels()
+  }
 
   function aim() {
     service.monitorName = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
@@ -174,198 +181,32 @@ Item {
     service.readDecoration()
   }
 
-  function show() {
-    service.aim()
-    service.arming()
-    service.refreshModels()
-    // Let the answers arrive before the thumbnails start flying, or they fly
-    // from nowhere. Short enough to be invisible, long enough for one round
-    // trip; the gesture skips it because at the start of a swipe the
-    // thumbnails are still sitting exactly on top of their windows.
-    settle.restart()
-  }
-
-  Timer {
-    id: settle
-    interval: 70
-    onTriggered: service.glideTo(true, 0)
-  }
-
-  function hide() {
-    settle.stop()
-    service.scrub = ""
-    service.glideTo(false, 0)
-  }
-
-  // Past fully open the overview keeps going with the fingers — the cards go
-  // on shrinking toward the strip — but gives less and less for each
-  // centimetre, the way a scroll view does past its end, and springs back to
-  // its proper size when they lift. Starts out one-to-one, so there is no
-  // point where it visibly catches; `stretch` is how far it could ever get.
-  readonly property real stretch: 0.3
-  function rubber(value) {
-    if (value <= 1) return value
-    const over = value - 1
-    return 1 + service.stretch * (1 - 1 / (1 + over / service.stretch))
-  }
-
-  function toggle() { service.goal > 0.5 ? service.hide() : service.show() }
-
-  // The fastest the overview follows the fingers, in `t` a second: a full
-  // open in an eighth of a second. See Spring.chase.
-  readonly property real chaseSpeed: 8
-
-  // How it lands once the fingers lift: back from a stretch, or the rest of
-  // the way open or closed.
-  readonly property real landStiffness: 56
-  readonly property real landDamping: 2.0
-
-  // Fingers down or the spring still moving: `t` is changing every frame and
-  // everything drawn from it must follow it exactly, not ease toward it.
-  readonly property bool animating: tSpring.running || service.scrub !== ""
-
-  // How fast the fingers were moving `t` when last seen, in `t` per second —
-  // measured on what is on screen, stretch and all, so the spring picks up at
-  // exactly the speed the overview already had.
-  property real handSpeed: 0
-  property real lastGoal: 0
-  property double lastAt: 0
-
-  function track(goal) {
-    const now = Date.now()
-    const dt = (now - service.lastAt) / 1000
-    if (service.lastAt > 0 && dt > 0 && dt < 0.1) {
-      const v = (goal - service.lastGoal) / dt
-      // Smoothed over a few events: single samples at 125 a second are noisy.
-      service.handSpeed = service.handSpeed * 0.6 + v * 0.4
-    } else {
-      service.handSpeed = 0
-    }
-    service.lastGoal = goal
-    service.lastAt = now
-  }
-
-  // Head for open or closed. The spring already has whatever speed the
-  // fingers gave it, so letting go is only a change of target; `velocity` (in
-  // `t` per second) tops that up when the fingers were faster than the spring
-  // had caught up to — a flick — and only in the direction it is going.
-  function glideTo(wantOpen, speed, velocity) {
-    const target = wantOpen ? 1 : 0
-    service.goal = target
-    if (!tSpring.running) tSpring.value = service.t
-    tSpring.stiffness = service.landStiffness
-    tSpring.damping = service.landDamping
-    // Straight on at the speed it had, whichever way that was: flung past
-    // open it carries on a little and comes back, let go mid-stretch it
-    // eases back from wherever it was heading. Starting from a standstill
-    // instead is the stall you feel as lag.
-    if (velocity !== undefined) tSpring.velocity = Math.max(-8, Math.min(8, velocity))
-    tSpring.follow(target)
-  }
-
-  // Fingers down: the overview is theirs, exactly, until they lift.
-  function grab() {
-    tSpring.hold()
-    tSpring.velocity = 0
-    service.goal = service.t
-    service.handSpeed = 0
-    service.lastAt = 0
-  }
-
-  Spring {
-    id: tSpring
-    floor: 0
-    onValueChanged: service.t = tSpring.value
-  }
-
   // ---------------------------------------------------------------- the swipe
 
-  readonly property string gestureFile: {
-    const url = Qt.resolvedUrl("../app/gesture.lua").toString()
-    return url.startsWith("file://") ? url.slice(7) : url
+  // app/gesture.lua in Hyprland, and what three fingers sideways mean there. See
+  // HyprGestures.qml.
+  HyprGestures {
+    id: gestures
+    sideways: service.sideways
+    // A reload put the glass plugin's settings back to their defaults; off
+    // was said at once, and on waits for the reload to settle.
+    onReloading: if (service.liquidGlass) service.applyGlass()
   }
+  readonly property alias gestureFile: gestures.path
+  property alias registerAgain: gestures.again
+  property alias checksLeft: gestures.checksLeft
+  function registerGesture() { gestures.load() }
 
-  // Asked to register again while an eval was still in flight. At login a
-  // monitor daemon reloads Hyprland while the first eval waits on a modeset;
-  // dropping the second ask left the reloaded Lua state with no gestures.
-  property bool registerAgain: false
+  readonly property string sideways: service.open || service.deskSwipe ? "slide"
+                                   : (!service.showing ? "none" : "")
+  property alias sidewaysSent: gestures.sidewaysSent
+  function sendSideways() { gestures.sendSideways() }
 
-  Process {
-    id: lua
-    // A failed eval (Hyprland not answering yet) registered nothing: try again.
-    onExited: (code) => { if (code !== 0) rearm.restart() }
-    // Registering the gestures resets nothing sideways, but a fresh Lua state
-    // after a config reload has nothing registered at all: say it again.
-    onRunningChanged: if (!running) {
-      if (service.registerAgain) {
-        service.registerAgain = false
-        service.registerGesture()
-        return
-      }
-      service.sidewaysSent = ""
-      service.sendSideways()
-      service.checksLeft = 5
-      check.restart()
-    }
-  }
-
-  // Whether the gestures are still there, a few times after each registration.
-  // At login a monitor daemon rewrites monitors.lua, and the autoreload that
-  // follows can land after our eval without its `configreloaded` reaching us:
-  // nothing would ever register again. So ask the Lua state itself, which
-  // forgets the flag gesture.lua sets the moment it forgets the gestures.
-  property int checksLeft: 0
-
-  Timer {
-    id: check
-    interval: 2000
-    onTriggered: if (!lua.running && !probe.running) probe.running = true
-  }
-
-  Process {
-    id: probe
-    command: ["/usr/bin/hyprctl", "eval",
-              'if not _G.__aerial_registered then error("aerial: gestures gone") end']
-    onExited: (code) => {
-      if (code !== 0) service.registerGesture()
-      else if (--service.checksLeft > 0) check.restart()
-    }
-  }
-
-  // The desktop's own wallpaper, which the overview sits on and every workspace
-  // tile is a small picture of. Omarchy keeps it behind a symlink that moves
-  // when the theme changes, so resolve it rather than remember it — but never
-  // while a swipe is running: this looks it up at startup and whenever the
-  // overview closes, so it is already known by the time one opens.
-  property string wallpaper: ""
-
-  // Resolved in QML rather than by a shell, and `readlink` by absolute path:
-  // a plugin runs unsandboxed, so it should not be spawning shells to expand a
-  // variable it can read itself.
-  readonly property string backgroundLink: {
-    const state = String(Quickshell.env("XDG_STATE_HOME") || "")
-    const home = String(Quickshell.env("HOME") || "")
-    const base = state !== "" ? state : (home !== "" ? home + "/.local/state" : "")
-    return base === "" ? "" : base + "/omarchy/current/background"
-  }
-
-  Process {
-    id: findWallpaper
-    command: ["/usr/bin/readlink", "-f", service.backgroundLink]
-    stdout: StdioCollector {
-      onStreamFinished: {
-        const path = text.trim()
-        // Only ever a path the compositor's own theme points at, and only used
-        // as an image source.
-        if (path.startsWith("/")) service.wallpaper = path
-      }
-    }
-  }
-
-  function findTheWallpaper() {
-    if (service.backgroundLink === "" || findWallpaper.running) return
-    findWallpaper.running = true
-  }
+  // The desktop's own wallpaper, which the overview sits on. See Wallpaper.qml.
+  Wallpaper { id: desktopWallpaper }
+  property alias wallpaper: desktopWallpaper.path
+  readonly property alias backgroundLink: desktopWallpaper.link
+  function findTheWallpaper() { desktopWallpaper.resolve() }
 
   // Where the overview is, for the parts that make way for it.
   readonly property string announced: service.open ? "open"
@@ -385,194 +226,14 @@ Item {
 
   // ------------------------------------------------------------ decoration
 
-  // How Hyprland dresses a window: its rounding, border and shadow. At the
-  // start of a swipe every card sits exactly on top of its window, and the
-  // desktop behind has already been painted over, so a card has to look like
-  // the window it stands in for — not like a square screenshot of its
-  // contents — or the first frame of every swipe is a visible jump.
-  property var deco: ({
-    rounding: 0,
-    border: 0,
-    activeBorder: "transparent",
-    inactiveBorder: "transparent",
-    shadow: false,
-    shadowRange: 0,
-    shadowColor: "transparent",
-    shadowColorInactive: "transparent",
-    shadowOffsetX: 0,
-    shadowOffsetY: 0,
-    blur: false,
-    blurSize: 8,
-    blurPasses: 1,
-    blurNoise: 0,
-    blurContrast: 1,
-    blurBrightness: 1,
-    blurVibrancy: 0,
-    blurVibrancyDarkness: 0,
-    blurIgnoreOpacity: true,
-    shadowPower: 1,
-    roundingPower: 2,
-    // The liquidglass Hyprland plugin's lens over the blur, when it is loaded.
-    glass: false,
-    glassBezel: 40,
-    glassRefraction: 45,
-    glassDispersion: 0.25,
-    glassSpecular: 0.16,
-    glassLightAngle: 225,
-    glassBrightness: 1.04,
-    glassSaturation: 1.15,
-    // The titlebars Omarchy puts on floating workspaces' windows (hyprbars), when
-    // that plugin is loaded. `barTag` is the window tag that gets one; "" is all.
-    bars: false,
-    barHeight: 0,
-    barColor: "transparent",
-    barText: "transparent",
-    barTextSize: 12,
-    barFont: "monospace",
-    barPadding: 10,
-    barButtonPadding: 8,
-    barTitle: true,
-    barTag: "",
-  })
-
-  readonly property var decoOptions: [
-    "decoration:rounding", "general:border_size",
-    "general:col.active_border", "general:col.inactive_border",
-    "decoration:shadow:enabled", "decoration:shadow:range",
-    "decoration:shadow:color", "decoration:shadow:color_inactive",
-    "decoration:blur:enabled", "decoration:blur:size", "decoration:blur:passes",
-    "decoration:blur:noise", "decoration:blur:contrast", "decoration:blur:brightness",
-    "decoration:blur:vibrancy", "decoration:blur:vibrancy_darkness",
-    "decoration:blur:ignore_opacity",
-    "decoration:shadow:render_power", "decoration:rounding_power",
-    "decoration:shadow:offset",
-    // Not there unless the plugin is loaded, which reads as no glass.
-    "plugin:liquidglass:enabled", "plugin:liquidglass:windows",
-    "plugin:liquidglass:bezel", "plugin:liquidglass:refraction",
-    "plugin:liquidglass:dispersion", "plugin:liquidglass:specular",
-    "plugin:liquidglass:light_angle", "plugin:liquidglass:brightness",
-    "plugin:liquidglass:saturation",
-    // Likewise: no plugin, no titlebars.
-    "plugin:hyprbars:enabled", "plugin:hyprbars:bar_height",
-    "plugin:hyprbars:bar_color", "plugin:hyprbars:col.text",
-    "plugin:hyprbars:bar_text_size", "plugin:hyprbars:bar_text_font",
-    "plugin:hyprbars:bar_padding", "plugin:hyprbars:bar_button_padding",
-    "plugin:hyprbars:bar_title_enabled", "plugin:hyprbars:workspace_tag",
-  ]
-
-  Process {
-    id: readDeco
-    command: ["/usr/bin/hyprctl", "--batch",
-              service.decoOptions.map(o => "j/getoption " + o).join("; ")]
-    stdout: StdioCollector {
-      onStreamFinished: service.takeDeco(text)
-    }
-  }
-
-  // Hyprland prints colours as AARRGGBB, which is what Qt reads after a "#".
-  // A gradient is a list of them and an angle; the first colour stands for it.
-  function colourOf(entry) {
-    const raw = entry && (entry.gradient || entry.color || entry.str)
-    // A gradient can come back with its angle run straight on, as in
-    // "143a332a0deg": the colour is the first eight hex digits either way.
-    const hex = /^\s*([0-9a-fA-F]{8})/.exec(String(raw || ""))
-    return hex ? "#" + hex[1] : "transparent"
-  }
-
-  // A plugin's colours come back as one number, AARRGGBB.
-  function intColourOf(entry) {
-    if (!entry || typeof entry.int !== "number") return service.colourOf(entry)
-    return "#" + (entry.int >>> 0).toString(16).padStart(8, "0")
-  }
-
-  function vecOf(entry, i) {
-    const v = entry && entry.vec2
-    return v && v.length > i ? Number(v[i]) || 0 : 0
-  }
-
-  function takeDeco(text) {
-    const byName = ({})
-    for (const chunk of String(text).split(/\n\s*\n/)) {
-      try {
-        const entry = JSON.parse(chunk)
-        if (entry && entry.option) byName[entry.option] = entry
-      } catch (e) {}
-    }
-    const num = name => {
-      const e = byName[name]
-      return e ? Number(e.int !== undefined ? e.int : (e.float !== undefined ? e.float : 0)) : 0
-    }
-    const shadowOn = byName["decoration:shadow:enabled"]
-    const blurOn = byName["decoration:blur:enabled"]
-    const ignoreOpacity = byName["decoration:blur:ignore_opacity"]
-    const on = name => { const e = byName[name]; return !!(e && (e.bool === true || e.int === 1)) }
-    const or = (name, fallback) => byName[name] ? num(name) : fallback
-    service.deco = {
-      rounding: Math.max(0, num("decoration:rounding")),
-      border: Math.max(0, num("general:border_size")),
-      activeBorder: service.colourOf(byName["general:col.active_border"]),
-      inactiveBorder: service.colourOf(byName["general:col.inactive_border"]),
-      shadow: !!(shadowOn && (shadowOn.bool === true || shadowOn.int === 1)),
-      shadowRange: Math.max(0, num("decoration:shadow:range")),
-      shadowColor: service.colourOf(byName["decoration:shadow:color"]),
-      // Hyprland reports this one as ffffffff when it is unset, which means
-      // "same as the active colour", so `set` says which to read.
-      shadowColorInactive: service.colourOf(byName["decoration:shadow:color_inactive"]?.set
-                                            ? byName["decoration:shadow:color_inactive"]
-                                            : byName["decoration:shadow:color"]),
-      // Where Hyprland moves the shadow from under the window, in logical
-      // pixels: a theme that drops it a little below has to be matched, or
-      // the shadow jumps as the windows take back over.
-      shadowOffsetX: service.vecOf(byName["decoration:shadow:offset"], 0),
-      shadowOffsetY: service.vecOf(byName["decoration:shadow:offset"], 1),
-      blur: !!(blurOn && (blurOn.bool === true || blurOn.int === 1)),
-      blurSize: Math.max(0, num("decoration:blur:size")),
-      blurPasses: Math.max(1, num("decoration:blur:passes")),
-      blurNoise: num("decoration:blur:noise"),
-      blurContrast: byName["decoration:blur:contrast"] ? num("decoration:blur:contrast") : 1,
-      blurBrightness: byName["decoration:blur:brightness"] ? num("decoration:blur:brightness") : 1,
-      blurVibrancy: num("decoration:blur:vibrancy"),
-      blurVibrancyDarkness: num("decoration:blur:vibrancy_darkness"),
-      // Whether the blur behind a see-through window is see-through too, or
-      // drawn whole under it. Hyprland's default is whole.
-      blurIgnoreOpacity: !ignoreOpacity || ignoreOpacity.bool === true || ignoreOpacity.int === 1,
-      shadowPower: Math.max(1, Math.min(4, num("decoration:shadow:render_power") || 1)),
-      roundingPower: byName["decoration:rounding_power"] ? num("decoration:rounding_power") : 2,
-      glass: on("plugin:liquidglass:enabled") && on("plugin:liquidglass:windows"),
-      glassBezel: or("plugin:liquidglass:bezel", 40),
-      glassRefraction: or("plugin:liquidglass:refraction", 45),
-      glassDispersion: or("plugin:liquidglass:dispersion", 0.25),
-      glassSpecular: or("plugin:liquidglass:specular", 0.16),
-      glassLightAngle: or("plugin:liquidglass:light_angle", 225),
-      glassBrightness: or("plugin:liquidglass:brightness", 1.04),
-      glassSaturation: or("plugin:liquidglass:saturation", 1.15),
-      bars: on("plugin:hyprbars:enabled") && num("plugin:hyprbars:bar_height") > 0,
-      barHeight: Math.max(0, num("plugin:hyprbars:bar_height")),
-      barColor: service.intColourOf(byName["plugin:hyprbars:bar_color"]),
-      barText: service.intColourOf(byName["plugin:hyprbars:col.text"]),
-      barTextSize: or("plugin:hyprbars:bar_text_size", 12),
-      barFont: (byName["plugin:hyprbars:bar_text_font"] || {}).str || "monospace",
-      barPadding: or("plugin:hyprbars:bar_padding", 10),
-      barButtonPadding: or("plugin:hyprbars:bar_button_padding", 8),
-      // Hyprland's default is on; unset, it reads as that.
-      barTitle: !byName["plugin:hyprbars:bar_title_enabled"] || on("plugin:hyprbars:bar_title_enabled"),
-      barTag: (byName["plugin:hyprbars:workspace_tag"] || {}).str || "",
-    }
-  }
-
-  function readDecoration() {
-    if (!readDeco.running) readDeco.running = true
-  }
-
-  function registerGesture() {
-    if (lua.running) {
-      service.registerAgain = true
-      return
-    }
-    const path = service.gestureFile.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-    lua.command = ["/usr/bin/hyprctl", "eval", 'dofile("' + path + '")']
-    lua.running = true
-  }
+  // How Hyprland dresses a window. See DecoReader.qml.
+  DecoReader { id: decoReader }
+  property alias deco: decoReader.deco
+  readonly property alias decoOptions: decoReader.options
+  function colourOf(entry) { return decoReader.colourOf(entry) }
+  function vecOf(entry, i) { return decoReader.vecOf(entry, i) }
+  function takeDeco(text) { decoReader.take(text) }
+  function readDecoration() { decoReader.read() }
 
   // Three fingers sideways slide between workspaces, overview open or not.
   //
@@ -592,62 +253,18 @@ Item {
   // the settings panel; it costs GPU time while the overview is up.
   property bool frost: true
 
-  // Liquid glass: the liquidglass Hyprland plugin (glass/), which turns
-  // Hyprland's blur into a lens at the edges of whatever it blurs; the
-  // overview's cards draw the same lens (see blur/frost.frag). Set from the
-  // settings panel. glass/glass-ctl builds the plugin for the running
-  // Hyprland the first time, loads it and switches it.
-  property bool liquidGlass: false
-  // "off", "working" (building or loading), "on", or "error" with glassError.
-  property string glassState: "off"
-  property string glassError: ""
-  property bool glassAgain: false
-  readonly property string glassCtl: {
-    const url = Qt.resolvedUrl("../../glass/glass-ctl").toString()
-    return url.startsWith("file://") ? url.slice(7) : url
+  // Liquid glass, set from the settings panel. See GlassControl.qml.
+  GlassControl {
+    id: glass
+    // The cards follow the compositor's glass.
+    onFinished: service.readDecoration()
   }
-
-  onLiquidGlassChanged: service.applyGlass()
-
-  // A config reload puts the plugin's options back to their defaults, and its
-  // default is on, so a loaded plugin has to be told again that the glass is off.
-  Connections {
-    target: Hyprland
-    function onRawEvent(event) {
-      if (event.name === "configreloaded" && !service.liquidGlass) service.applyGlass()
-    }
-  }
-
-  function applyGlass() {
-    if (glassProc.running) {
-      service.glassAgain = true
-      return
-    }
-    service.glassState = service.liquidGlass ? "working" : "off"
-    service.glassError = ""
-    glassProc.command = [service.glassCtl, service.liquidGlass ? "on" : "off"]
-    glassProc.running = true
-  }
-
-  Process {
-    id: glassProc
-    stderr: StdioCollector { id: glassErr }
-    onExited: (code) => {
-      if (service.glassAgain) {
-        service.glassAgain = false
-        service.applyGlass()
-        return
-      }
-      if (code !== 0 && service.liquidGlass) {
-        service.glassState = "error"
-        service.glassError = String(glassErr.text || "").trim() || "The glass did not start."
-      } else {
-        service.glassState = service.liquidGlass ? "on" : "off"
-      }
-      // The cards follow the compositor's glass.
-      service.readDecoration()
-    }
-  }
+  property alias liquidGlass: glass.want
+  property alias glassState: glass.status
+  property alias glassError: glass.error
+  property alias glassAgain: glass.again
+  readonly property alias glassCtl: glass.ctl
+  function applyGlass() { glass.apply() }
 
   // Every screen is one desktop: sliding, or picking one from the strip,
   // switches all of them together. See `synced` in the overlay. Set from the
@@ -655,7 +272,7 @@ Item {
   property bool syncScreens: false
 
   // Which keeps every screen one desktop as screens come and go.
-  Screens { enabled: service.syncScreens }
+  Screens { active: service.syncScreens }
 
   // ---------------------------------------------------------- recording keys
 
@@ -683,53 +300,11 @@ Item {
     onTriggered: service.setRecording(false)
   }
 
-  readonly property string sideways: service.open || service.deskSwipe ? "slide"
-                                   : (!service.showing ? "none" : "")
-  property string sidewaysSent: ""
-
-  // In an eval of its own, after the gestures exist: if the user already has
-  // a horizontal swipe, Hyprland refuses ours and that refusal must not take
-  // the up and down gestures with it.
-  Process {
-    id: sidewaysLua
-    onRunningChanged: if (!running && service.sidewaysSent !== service.sideways) service.sendSideways()
-  }
-
-  function sendSideways() {
-    if (lua.running || sidewaysLua.running) return
-    const mode = service.sideways
-    if (mode === "") return   // in between: keep whatever is there
-    service.sidewaysSent = mode
-    sidewaysLua.command = ["/usr/bin/hyprctl", "eval", '__aerial_horizontal("' + mode + '")']
-    sidewaysLua.running = true
-  }
-
-  onSidewaysChanged: service.sendSideways()
-
-  // A swipe shorter than this cannot open the overview however fast it was:
-  // a flick has to be deliberate, not a brush against the pad.
-  readonly property real flickFloor: 0.08
-  // Travel per millisecond, as the Lua half measures it.
-  readonly property real flickSpeed: 2.0
-
-  /** Was that swipe thrown rather than dragged? */
-  function flicked(fraction, speed) {
-    return speed >= service.flickSpeed && fraction >= service.flickFloor
-  }
-
   // What the Lua half sends, one fraction at a time.
   function onGesture(data) {
-    const cut = data.indexOf(":")
-    const what = cut < 0 ? data : data.slice(0, cut)
-    const rest = cut < 0 ? "" : data.slice(cut + 1)
-    const parts = rest.split(":")
-    const raw = parseFloat(parts[0]) || 0
-    const value = Math.max(0, raw)
-    const speed = parseFloat(parts[1]) || 0
-    const cancelled = parts[2] === "1"
-    // Along the swipe, in progress per second. Older gesture halves did not
-    // send it, and then there is nothing to carry on from.
-    const velocity = parts.length > 3 ? (parseFloat(parts[3]) || 0) : undefined
+    const wire = Wire.parse(data)
+    const what = wire.what
+    const rest = wire.rest
 
     if (what === "shape") {
       // Only ever sent when the Lua half could not find the movement in what
@@ -756,13 +331,10 @@ Item {
     }
 
     // "allup-move" is the four-finger version of "up-move", and so on.
-    const dash = what.lastIndexOf("-")
-    if (dash < 0) return
-    const who = what.slice(0, dash)
-    const phase = what.slice(dash + 1)
+    if (what.indexOf("-") < 0) return
 
-    if (who === "side") {
-      if (phase === "begin" && !service.open) {
+    if (wire.who === "side") {
+      if (wire.phase === "begin" && !service.open) {
         // Half open or half closed, a sideways swipe means nothing.
         if (service.showing) return
         if (!service.deskSwipe) {
@@ -773,114 +345,12 @@ Item {
           return
         }
         // On the desktop: put the overview up, at no zoom, to slide.
-        service.deskSlide = true
-        service.aim()
-        service.arming()
-        service.refreshModels()
+        service.beginDeskSlide()
       }
-      service.sideSwipe(phase, raw, velocity || 0, cancelled)
+      service.sideSwipe(wire.phase, wire.raw, wire.velocity, wire.cancelled)
       return
     }
-    const opening = who === "up" || who === "allup"
-    const wantsEverything = who === "allup" || who === "alldown"
-
-    switch (phase) {
-    case "begin":
-      if (opening && service.open) {
-        // Already open: swiping up again is only the stretch, and springs
-        // back. Nothing is re-read, so nothing on screen is rebuilt.
-      } else if (opening) {
-        service.upFingers = 0
-        service.everything = wantsEverything
-        service.aim()
-        service.arming()
-        // The snapshot above is what the cards are built from; where each
-        // window really is right now arrives a few milliseconds later and the
-        // cards follow it, so a window resized since the last event starts
-        // the swipe at its true size.
-        service.refreshModels()
-      } else {
-        // Swiping down puts the overview away from anywhere it is visible,
-        // including halfway through opening. On the bare desktop the gesture
-        // belongs to whoever else wants it.
-        if (service.t < 0.05) return
-      }
-      settle.stop()
-      service.grab()
-      service.scrubFrom = service.t
-      service.scrub = who
-      break
-
-    case "move":
-      if (service.scrub !== who) return
-      if (opening) {
-        // The first full swipe's worth of travel covers whatever was left to
-        // open; everything past it is stretch. Already open, it is all stretch.
-        const from = service.scrubFrom
-        const raw = from >= 0.999 ? 1 + value
-                  : value <= 1 ? from + (1 - from) * value
-                  : 1 + (value - 1)
-        service.goal = service.rubber(raw)
-        if (service.upFingers >= 0) service.upFingers = Math.min(1, value)
-      } else {
-        service.goal = service.scrubFrom * (1 - Math.min(1, value))
-      }
-      tSpring.chase(service.goal, service.chaseSpeed)
-      service.track(service.goal)
-      break
-
-    case "end":
-      if (service.scrub !== who) return
-      // Judged on where it ended up, not on the swipe alone, so a gesture that
-      // carried on from a half-open overview is measured from what you saw.
-      {
-        let wantOpen
-        if (cancelled) wantOpen = service.goal > 0.5
-        else if (opening) wantOpen = service.goal > 0.5 || service.flicked(value, speed)
-        else wantOpen = !(service.goal < 0.5 || service.flicked(value, speed))
-
-        // The speed the overview had on screen as the fingers lifted — none,
-        // if they had come to rest first.
-        const resting = Date.now() - service.lastAt > 80
-        // Still catching up with a flick, it goes on at the speed it is
-        // actually moving on screen.
-        const carry = tSpring.lagging ? tSpring.velocity
-                    : (cancelled || resting ? 0 : service.handSpeed)
-        // Spring running before the fingers are let go of, so nothing ever
-        // sees a frame where neither is moving the overview.
-        service.glideTo(wantOpen, speed, carry)
-        if (service.upFingers >= 0) {
-          service.upFingers = -1
-          service.landing(wantOpen)
-        }
-      }
-      service.scrub = ""
-      break
-
-    default:
-      return
-    }
-
-    watchdog.restart()
-  }
-
-  // A gesture that stops sending without a lift — a reload mid-swipe, a
-  // compositor restart — must not strand the overview at 40%. Hyprland does
-  // report the lift, so this is a net and nothing more: at 450ms it was firing
-  // during ordinary pauses and snapping the animation out from under the hand.
-  Timer {
-    id: watchdog
-    interval: 1400
-    onTriggered: {
-      if (service.scrub === "") return
-      const wasMostlyOpen = service.goal > 0.5
-      service.scrub = ""
-      service.glideTo(wasMostlyOpen, 0)
-      if (service.upFingers >= 0) {
-        service.upFingers = -1
-        service.landing(wasMostlyOpen)
-      }
-    }
+    gesture.handle(wire)
   }
 
   // ---------------------------------------------------------------- listening
@@ -910,8 +380,12 @@ Item {
 
       if (name === "configreloaded") {
         // A reload drops runtime gestures the same way it drops runtime binds.
-        rearm.restart()
+        gestures.loadSoon()
         service.readDecoration()
+        // And it puts the glass plugin's options back to their defaults. Its
+        // default is on, so a loaded plugin is told right away that the glass
+        // is off, rather than showing for as long as `loadSoon` waits.
+        if (!service.liquidGlass) service.applyGlass()
         return
       }
 
@@ -934,18 +408,6 @@ Item {
     id: freshen
     interval: 180
     onTriggered: service.refreshModels()
-  }
-
-  Timer {
-    id: rearm
-    interval: 600
-    onTriggered: {
-      service.registerGesture()
-      // A reload puts the plugin's own settings back to their defaults, its
-      // on/off with them: say again which it is. Off with nothing loaded does
-      // nothing.
-      service.applyGlass()
-    }
   }
 
   Component.onCompleted: {

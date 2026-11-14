@@ -6,23 +6,33 @@ base=Path(tempfile.mkdtemp(prefix='foamy-center-motion-'));app=base/'app';app.mk
 (app/'Commons').symlink_to('/usr/share/omarchy/shell/Commons',target_is_directory=True)
 (app/'Ui').symlink_to('/usr/share/omarchy/shell/Ui',target_is_directory=True)
 (app/'components').symlink_to(source/'components',target_is_directory=True)
-for name in ['Model.js','Translations.js']:(app/name).symlink_to(source/name)
+(app/'Model.js').symlink_to(source/'Model.js')
 s=(source/'Panel.qml').read_text();a=s.index('          delegate: Item {');b=s.index('\n            }\n          }\n        }\n\n        // --------------------------------------------------------- empty',a)
 delegate=s[a:b]
 (app/'shell.qml').write_text('''import QtQuick
 import QtTest
 import Quickshell
 import qs.Commons
+import qs.Commons as Commons
 import "components"
 import "Model.js" as Model
 ShellRoot {
  id:root
  property bool compact:true
- property string language:"en"
  property double now:Date.now()
  property double readMark:0
- property color foreground:Color.popups.text
+ property color foreground:Commons.Color.popups.text
  property string fontFamily:Style.font.family
+ property bool holo:false
+ property string copyFamily:fontFamily
+ property color confirmInk:foreground
+ property string confirmGroup:""
+ function requestRemoveGroup(group){removeGroup(group)}
+ function answerConfirm(){}
+ function dropConfirm(){}
+ function confirmTargetGone(key){}
+ function tintFor(group){return Commons.Color.urgent}
+ function isFolded(row){return !!row&&row.kind==="message"&&!row.expanded&&row.group.entries.length>1}
  property bool keyboardNavigation:false
  property bool popupContentActive:true
  property int cursorIndex:-1
@@ -120,7 +130,7 @@ ShellRoot {
     list.positionViewAtEnd();wait(40);var last=item(79);compare(last.opacity,1);compare(last.entranceOffset,0)
     root.filter="no matches";root.rebuild();tryCompare(list,"count",0);wait(200)
     root.filter="App 3";root.rebuild();tryVerify(function(){return list.count>0});wait(220)
-    list.positionViewAtBeginning();root.compact=false;list.width=320;Color.background="#eff1f5";Color.foreground="#4c4f69";wait(100);capture("narrow-light-search")
+    list.positionViewAtBeginning();root.compact=false;list.width=320;Commons.Color.background="#eff1f5";Commons.Color.foreground="#4c4f69";wait(100);capture("narrow-light-search")
     root.keyboardNavigation=true;root.cursorIndex=1;wait(40)
     root.filter="";root.rebuild();tryCompare(list,"count",80)
    }catch(e){console.log("FAILED",e.message,e.stack);throw e}}

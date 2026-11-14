@@ -6,27 +6,23 @@ import qs.Ui
 import qs.Commons
 import qs.Commons as Commons
 import "Preferences.js" as Preferences
-import "Translations.js" as Translations
 import "components"
 
 Item {
   id: root
   required property var settings
-  required property var popupSettings
-  required property string language
-  property bool popupAvailable: false
-  property bool popupInstalled: false
-  property bool loading: false
   property bool saving: false
   property string error: ""
+  // Holographic theme. Off is the plain look, untouched.
+  property bool holo: false
+  property string monoFamily: Style.font.family
+  // Where this page's section line sits, for the frame's marks.
+  readonly property real ruleY: settingsHeader.height - 1
   readonly property color secondary: Qt.tint(Commons.Color.popups.background, Qt.alpha(Commons.Color.popups.text, 0.7))
   readonly property int padding: Style.space(20)
   implicitHeight: settingsHeader.height + settingsBody.implicitHeight
-  signal save(string scope, string key, var value)
+  signal save(string key, var value)
   signal back()
-  signal clearError()
-  signal pasteFailed(string message)
-  function tr(label) { return Translations.text(label, language) }
   function focusBack() { backButton.forceActiveFocus() }
   function resetScroll() { settingsScroll.contentY = 0 }
   Keys.onEscapePressed: root.back()
@@ -59,11 +55,31 @@ Item {
         objectName: "settingsBack"
         iconName: "back"
         foreground: root.secondary
-        tooltipText: root.tr("Back")
+        tooltipText: "Back"
         onClicked: root.back()
       }
-      Text { text: root.tr("Settings"); color: root.secondary; font.family: "sans-serif"; font.pixelSize: Style.space(13); Layout.fillWidth: true }
-      Text { visible: root.saving; text: root.tr("Saving…"); color: root.secondary; font.family: "sans-serif"; font.pixelSize: Style.space(11) }
+      Text {
+        text: "Settings"
+        color: root.holo ? Commons.Color.popups.text : root.secondary
+        font.family: "sans-serif"
+        font.bold: root.holo
+        font.pixelSize: root.holo ? Style.font.title : Style.space(13)
+        Layout.fillWidth: true
+      }
+      Text {
+        visible: root.saving
+        text: "Saving…"
+        color: Commons.Color.pick("holo.text-dim", root.secondary)
+        font.family: root.holo ? root.monoFamily : "sans-serif"
+        font.pixelSize: root.holo ? Style.font.caption : Style.space(11)
+      }
+    }
+    Rectangle {
+      visible: root.holo
+      anchors.bottom: parent.bottom
+      width: parent.width
+      height: 1
+      color: Qt.alpha(Commons.Color.pick("holo.line", root.secondary), Commons.Color.pickAlpha("holo.line-alpha", 0.12))
     }
   }
   Flickable {
@@ -93,47 +109,29 @@ Item {
         text: root.error
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
-        color: Commons.Color.urgent
+        color: Commons.Color.pick("holo.text-alert", Commons.Color.urgent)
         font.family: "sans-serif"
         font.pixelSize: Style.space(12)
         Accessible.role: Accessible.AlertMessage
       }
+      Text {
+        objectName: "settingsSectionLabel"
+        topPadding: root.holo ? Style.space(14) : 0
+        text: "Notification Center"
+        color: Commons.Color.pick("holo.text-dim", root.secondary)
+        font.family: root.holo ? root.monoFamily : "sans-serif"
+        font.pixelSize: root.holo ? Style.font.caption : Style.space(13)
+      }
       Repeater {
-        model: [{scope:"center",label:"Notification Center",fields:Preferences.centerFields}, {scope:"popups",label:"Foamy Notifications",fields:Preferences.popupFields}]
-        Column {
-          id: section
+        model: Preferences.fields
+        SettingsField {
           required property var modelData
           width: root.width - root.padding * 2
-          spacing: Style.space(14)
-          Text { text: root.tr(section.modelData.label); color: root.secondary; font.family: "sans-serif"; font.pixelSize: Style.space(13) }
-          Text {
-            objectName: section.modelData.scope + "-availability"
-            width: parent.width
-            visible: section.modelData.scope === "popups" && !root.popupAvailable && (root.loading || root.error === "")
-            text: root.tr(root.loading ? "Reading settings…" : root.popupInstalled ? "Plugin not enabled" : "Plugin not installed")
-            textFormat: Text.PlainText
-            wrapMode: Text.WordWrap
-            color: Qt.tint(Commons.Color.popups.background, Qt.alpha(Commons.Color.popups.text, 0.55))
-            font.family: "sans-serif"
-            font.pixelSize: Style.space(12)
-          }
-          Repeater {
-            // Keep loaded editors stable during refreshes so reads cannot steal focus.
-            model: section.modelData.scope === "center" || root.popupAvailable ? section.modelData.fields : []
-            SettingsField {
-              required property var modelData
-              width: section.width
-              scope: section.modelData.scope
-              field: modelData
-              settings: scope === "center" ? root.settings : root.popupSettings
-              language: root.language
-              enabled: !root.saving && (scope === "center" || root.popupAvailable)
-              opacity: enabled ? 1 : 0.55
-              onSave: function(value) { root.save(scope, field.key, value) }
-              onClearError: root.clearError()
-              onPasteFailed: function(message) { root.pasteFailed(message) }
-            }
-          }
+          field: modelData
+          settings: root.settings
+          enabled: !root.saving
+          opacity: enabled ? 1 : 0.55
+          onSave: function(value) { root.save(field.key, value) }
         }
       }
     }

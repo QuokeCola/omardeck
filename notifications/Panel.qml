@@ -13,7 +13,6 @@ import qs.Ui
 import "." as Plugin
 import "Model.js" as Model
 import "BrowserIdentity.js" as BrowserIdentity
-import "Translations.js" as Translations
 import "Preferences.js" as Preferences
 import "components"
 
@@ -54,8 +53,17 @@ Panel {
   readonly property string omarchyPath: Quickshell.env("OMARCHY_PATH")
 
   readonly property color foreground: Commons.Color.popups.text
+  readonly property bool holo: holoFrame.item ? holoFrame.item.active : false
   readonly property color urgent: bar ? bar.urgent : Commons.Color.urgent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
+  // Sentences read in the sans under the holographic theme; the bar's mono stays
+  // for what is measured or short. The family is what the toasts resolve to here.
+  readonly property string copyFamily: holo ? "sans-serif" : fontFamily
+  readonly property color errorText: Commons.Color.pick("holo.text-alert", Commons.Color.urgent)
+  // A theme's urgent isn't promised to read as small text, so only this theme's is used.
+  readonly property color confirmInk: holo ? errorText : foreground
+  readonly property color dimText: Commons.Color.pick("holo.text-dim", Util.alpha(foreground, 0.6))
+  readonly property color sectionLine: Qt.alpha(Commons.Color.pick("holo.line", foreground), Commons.Color.pickAlpha("holo.line-alpha", 0.12))
 
   // ----------------------------------------------------------------- settings
 
@@ -74,34 +82,21 @@ Panel {
   readonly property bool showPreview: setting("showPreview", true)
 
   // ------------------------------------------------------------- the service
-  //
-  readonly property string language: Translations.language(setting("language", "system"), Qt.locale().name)
-  function tr(label, value) { return Translations.text(label, language, value) }
 
   readonly property bool dnd: store ? store.doNotDisturb : false
   function toggleDnd() { if (store) store.toggleDnd() }
 
   property bool editingSettings: false
   property string settingsError: ""
-  property var popupSettings: ({})
-  property bool popupSettingsAvailable: false
-  property bool popupSettingsLoading: false
-  readonly property bool popupPluginInstalled: {
-    var registry = bar && "pluginRegistry" in bar ? bar.pluginRegistry : null
-    // Use the host's manifest registry so a stale settings entry cannot imply installation.
-    return registry && registry.installedPlugins
-      ? !!registry.installedPlugins["foamy.notifications"] : popupSettingsAvailable
-  }
   property var pendingPreferences: ({})
   property var preferenceActive: null
-  readonly property string preferencesHelper: decodeURIComponent(Qt.resolvedUrl("bin/notification-preferences.py").toString().replace(/^file:\/\//, ""))
 
   function openSettings() {
     moreMenu.close()
     endSearch()
+    dropConfirm()
     editingSettings = true
     settingsError = ""
-    reloadPopupPreferences()
     settingsPane.resetScroll()
     Qt.callLater(function() { if (root.opened) settingsPane.focusBack() })
   }
@@ -109,50 +104,32 @@ Panel {
     editingSettings = false
     Qt.callLater(function() { if (root.opened) moreButton.forceActiveFocus() })
   }
-  function reloadPopupPreferences() {
-    if (!editingSettings || popupSettingsLoading || preferenceActive !== null) return
-    popupSettingsLoading = true
-    preferencesRead.running = true
-  }
-  function applyPopupPreferences(raw) {
-    var result = JSON.parse(raw)
-    if (!result || result.ok !== true || typeof result.available !== "boolean" || !result.settings || typeof result.settings !== "object") throw Error("Invalid settings response")
-    if (result.available) Preferences.popupFields.forEach(function(field) {
-      if (!Preferences.valid("popups", field.key, result.settings[field.key])) throw Error("Invalid popup setting")
-    })
-    popupSettingsAvailable = result.available
-    popupSettings = result.settings
-  }
-  function savePreference(scope, key, value) {
-    if (!Preferences.valid(scope, key, value)) { settingsError = tr("Invalid setting."); return }
+  function savePreference(key, value) {
+    if (!Preferences.valid(key, value)) { settingsError = "Invalid setting."; return }
     settingsError = ""
     // Serialize edits across the widget and service; collapse queued edits to the same key.
-    pendingPreferences[scope + ":" + key] = {scope:scope,key:key,value:value}
+    pendingPreferences[key] = {key:key,value:value}
     flushPreferences()
   }
   function flushPreferences() {
-    if (preferenceActive !== null || popupSettingsLoading) return
+    if (preferenceActive !== null) return
     var keys = Object.keys(pendingPreferences)
     if (!keys.length) return
     var next = pendingPreferences[keys[0]]
     delete pendingPreferences[keys[0]]
     preferenceActive = next
-    preferencesSave.command = Preferences.saveCommand(next.scope, next.key, next.value, preferencesHelper)
+    preferencesSave.command = Preferences.saveCommand(next.key, next.value)
     preferencesSave.running = true
   }
   function finishPreference(code, status, output) {
     var active = preferenceActive
     if (!active) return
-    try {
-      if (code !== 0 || status !== 0) throw Error("Settings command failed")
-      if (active.scope === "popups") applyPopupPreferences(output)
-      else if (output.trim() !== "ok") throw Error("Widget settings command failed")
-    } catch (error) {
-      settingsError = tr("Could not save settings. Try again.")
-      console.warn("Foamy Notification Center: settings save failed for", active.scope, active.key)
+    if (code !== 0 || status !== 0 || output.trim() !== "ok") {
+      settingsError = "Could not save settings. Try again."
+      console.warn("Notification center: settings save failed for", active.key)
     }
     preferenceActive = null
-    Qt.callLater(function() { root.flushPreferences(); root.reloadPopupPreferences() })
+    Qt.callLater(root.flushPreferences)
   }
   Process {
     id: preferencesSave
@@ -166,42 +143,6 @@ Panel {
       if (preferencesSave.running) preferencesSave.signal(9)
       else root.finishPreference(1, 0, "")
     }
-  }
-  Process {
-    id: preferencesRead
-    command: ["python3", root.preferencesHelper, "read"]
-    stdout: StdioCollector { id: preferenceReadOutput; waitForEnd: true }
-    onExited: function(code, status) {
-      try {
-        if (code !== 0 || status !== 0) throw Error("Settings read failed: " + code + "/" + status)
-        root.applyPopupPreferences(preferenceReadOutput.text)
-      } catch (error) {
-        root.popupSettingsAvailable = false
-        root.settingsError = root.tr("Could not read Foamy Notifications settings. Reopen Settings to retry.")
-        console.warn("Foamy Notification Center: popup settings read failed", String(error))
-      }
-      root.popupSettingsLoading = false
-      Qt.callLater(root.flushPreferences)
-    }
-  }
-  Timer {
-    interval: 5000
-    running: root.popupSettingsLoading
-    onTriggered: {
-      if (preferencesRead.running) preferencesRead.signal(9)
-      else {
-        root.popupSettingsLoading = false
-        root.popupSettingsAvailable = false
-        root.settingsError = root.tr("Could not read Foamy Notifications settings. Reopen Settings to retry.")
-        Qt.callLater(root.flushPreferences)
-      }
-    }
-  }
-  FileView {
-    path: (Quickshell.env("XDG_CONFIG_HOME") || Quickshell.env("HOME") + "/.config") + "/omarchy/shell.json"
-    watchChanges: true
-    printErrors: false
-    onFileChanged: { reload(); root.reloadPopupPreferences() }
   }
 
   // ------------------------------------------------------------- the store
@@ -284,7 +225,7 @@ Panel {
   function settleYield(target) {
     yieldSettle.stop()
     yieldSettle.to = target
-    yieldSettle.duration = Math.max(120, 300 * Math.abs(target - overviewYield))
+    yieldSettle.duration = Style.duration(Math.max(120, 300 * Math.abs(target - overviewYield)))
     yieldSettle.start()
   }
 
@@ -348,6 +289,7 @@ Panel {
   }
 
   function startSearch() {
+    dropConfirm()
     searching = true
     Qt.callLater(function() { if (root.opened && root.searching && search) search.forceActiveFocus() })
   }
@@ -355,14 +297,15 @@ Panel {
   function endSearch() {
     searching = false
     filter = ""
-    if (search) { search.text = ""; search.pasteError = "" }
+    if (search) search.text = ""
     Qt.callLater(function() { if (root.opened && keyCatcher) keyCatcher.forceActiveFocus() })
   }
 
   // ------------------------------------------------------------ app colours
   //
-  // Urgent cards are marked in the colour of the app that sent them. Each
-  // icon is drawn once into a small hidden canvas and read back; the result,
+  // Urgent cards are marked in the colour of the app that sent them, except
+  // under the holographic theme, where a green or cyan critical would say
+  // the wrong thing and they all wear the theme's red. Each icon is drawn once into a small hidden canvas and read back; the result,
   // or null for an icon with no colour of its own, is kept for the session.
   property var appTints: ({})
   property int appTintsVersion: 0
@@ -413,6 +356,91 @@ Panel {
     if (store) store.clearAll()
   }
 
+  // ------------------------------------------------------------- confirmation
+  //
+  // Clear-all and dismissing a whole stack can't be undone, so they ask once, in
+  // the row they would act on. The sheet stays live around the question: scrolling,
+  // opening a card and dismissing another still work. A single notification never
+  // asks, whichever way it is dismissed.
+  property bool confirmAll: false
+  property string confirmGroup: ""
+  property double confirmArmedAt: 0
+  // Whether Keep should hand focus back to the Clear-all button or to the list.
+  property bool confirmFromButton: false
+  readonly property bool confirmOpen: confirmAll || confirmGroup !== ""
+
+  function requestClearAll() {
+    if (entries.length === 0) return
+    confirmFromButton = clearButton.activeFocus
+    confirmGroup = ""
+    confirmAll = true
+    confirmArmedAt = Date.now()
+  }
+
+  function requestRemoveGroup(group) {
+    if (!Model.removalNeedsConfirm(group)) { removeGroup(group); return }
+    confirmFromButton = false
+    confirmAll = false
+    confirmGroup = group.key
+    confirmArmedAt = Date.now()
+  }
+
+  // Put the question away and leave the keyboard somewhere that works.
+  function dropConfirm() {
+    if (!confirmOpen) return
+    var toButton = confirmFromButton && confirmAll
+    confirmAll = false
+    confirmGroup = ""
+    confirmFromButton = false
+    if (!root.opened) return
+    if (toButton) clearButton.forceActiveFocus()
+    else keyCatcher.forceActiveFocus()
+  }
+
+  function answerConfirm() {
+    if (!Model.confirmSettled(confirmArmedAt, Date.now())) return
+    var everything = confirmAll
+    var key = confirmGroup
+    confirmFromButton = false
+    dropConfirm()
+    if (everything) clearAll()
+    else {
+      var header = rows.find(function(row) { return row.kind === "header" && row.group.key === key })
+      if (header) removeGroup(header.group)
+    }
+  }
+
+  // The stack it was asking about has gone: emptied elsewhere, or scrolled away.
+  function confirmTargetGone(key) {
+    if (confirmGroup === key) dropConfirm()
+  }
+
+  // Esc walks back one thing at a time before it closes the sheet.
+  function stepBack() {
+    if (confirmOpen) dropConfirm()
+    else if (headerFocused()) keyCatcher.forceActiveFocus()
+    else if (searching) endSearch()
+    else close()
+  }
+
+  // ---------------------------------------------------------- header by keyboard
+  //
+  // Tab belongs to the bar (it switches panels), so the header actions are reached
+  // the way the list is: Up from the top of the list, Left and Right between them,
+  // Down back into the list. They hold real focus, so their own ring and key
+  // handling are the same ones a pointer-opened menu returns to.
+  function headerFocused() {
+    return clearButton.activeFocus || moreButton.activeFocus
+  }
+
+  function focusHeaderActions() {
+    keyboardNavigation = false
+    cursorIndex = -1
+    cursorDismiss = false
+    if (clearButton.enabled) clearButton.forceActiveFocus()
+    else moreButton.forceActiveFocus()
+  }
+
   function handleEntryAdded(entry) {
     if (!entry || !entry.key) return
     if (root.opened && store) store.markSeen()
@@ -436,6 +464,9 @@ Panel {
   property int cursorIndex: -1
   property bool cursorDismiss: false
   property bool keyboardNavigation: false
+  // A header action holds the keyboard. Only for what the subtitle says: the
+  // handlers ask headerFocused(), which reads the same focus at the moment of the key.
+  readonly property bool headerKeys: clearButton.activeFocus || moreButton.activeFocus
 
   function rebuild(forOpening) {
     // The archive and unread count stay live; display groups are needed only while open.
@@ -449,6 +480,10 @@ Panel {
       row.group.favicon = root.useBrowserFavicons && store ? store.faviconSource(row.group.iconEntry) : ""
     })
     rows = next
+    if (confirmAll && entries.length === 0) dropConfirm()
+    if (confirmGroup !== "" && !next.some(function(row) {
+      return row.kind === "header" && row.group.key === confirmGroup && Model.removalNeedsConfirm(row.group)
+    })) dropConfirm()
     if (useBrowserFavicons && store) store.warmBrowserIcons(headers.map(function(row) { return row.group.iconEntry }).filter(Boolean))
     cursorIndex = index >= 0 ? index : Math.min(cursorIndex, rows.length - 1)
   }
@@ -476,7 +511,21 @@ Panel {
   }
 
   function moveCursor(dx, dy) {
-    if (rows.length === 0) return
+    dropConfirm()
+    if (headerFocused()) {
+      if (dy < 0) return
+      if (dx) {
+        if (clearButton.activeFocus) moreButton.forceActiveFocus()
+        else if (clearButton.enabled) clearButton.forceActiveFocus()
+        return
+      }
+      if (rows.length === 0) return
+      keyCatcher.forceActiveFocus()
+      cursorIndex = -1
+    } else if (rows.length === 0 || (dy < 0 && cursorIndex <= 0)) {
+      if (dy) focusHeaderActions()
+      return
+    }
     keyboardNavigation = true
     if (dy) {
       cursorIndex = Math.max(0, Math.min(rows.length - 1, cursorIndex + dy))
@@ -492,7 +541,7 @@ Panel {
     if (cursorIndex < 0 || cursorIndex >= rows.length) return
     var row = rows[cursorIndex]
     if (removeOnly || cursorDismiss) {
-      if (row.kind === "header") removeGroup(row.group)
+      if (row.kind === "header") requestRemoveGroup(row.group)
       else remove(row.entry.key)
     } else if (row.kind === "header" || isFolded(row)) {
       if (row.group.entries.length > 1) toggleGroup(row.group.key)
@@ -520,11 +569,12 @@ Panel {
     // Action feedback belongs to this panel visit, not the persistent archive.
     if (store) store.focusError = ""
     if (!opened) {
+      dropConfirm()
       moreMenu.close()
       editingSettings = false
       searching = false
       filter = ""
-      if (search) { search.text = ""; search.pasteError = "" }
+      if (search) search.text = ""
       return
     }
     // Opened over the overview, the sheet belongs on top of it.
@@ -572,10 +622,10 @@ Panel {
     activeColor: Commons.Color.accent
     tooltipText: {
       if (root.dnd) return root.unread > 0
-        ? root.tr("Silenced · %1 new", root.unread) : root.tr("Notifications silenced")
-      if (root.unread === 1) return root.tr("1 new notification")
-      if (root.unread > 1) return root.tr("%1 new notifications", root.unread)
-      return root.tr("Notifications")
+        ? "Silenced · " + root.unread + " new" : "Notifications silenced"
+      if (root.unread === 1) return "1 new notification"
+      if (root.unread > 1) return root.unread + " new notifications"
+      return "Notifications"
     }
 
     onPressed: function(b) {
@@ -610,9 +660,10 @@ Panel {
     anchors.rightMargin: Style.space(6)
     anchors.top: button.top
     anchors.topMargin: Style.space(10)
-    width: Style.space(6)
-    height: width
-    radius: width / 2
+    // Critical is also a longer bar under the holographic theme: not only a colour.
+    width: Style.space(root.holo && root.hasCriticalUnread ? 12 : 6)
+    height: Style.space(6)
+    radius: root.holo ? 0 : height / 2
     color: root.hasCriticalUnread ? root.urgent : Commons.Color.accent
   }
 
@@ -625,7 +676,7 @@ Panel {
     anchors.topMargin: Style.space(3)
     width: Math.max(countText.implicitWidth + Style.space(6), Style.space(12))
     height: Style.space(12)
-    radius: height / 2
+    radius: root.holo ? 0 : height / 2
     color: Commons.Color.accent
 
     Text {
@@ -636,7 +687,7 @@ Panel {
       // badge is only saying "a lot", which it can say in three characters.
       text: root.unread > 99 ? "99+" : String(root.unread)
       font.family: root.fontFamily
-      font.pixelSize: Math.max(8, Style.font.caption - Style.space(3))
+      font.pixelSize: Math.max(root.holo ? 9 : 8, Style.font.caption - Style.space(3))
       font.bold: true
       color: Commons.Color.background
     }
@@ -693,11 +744,11 @@ Panel {
     gap: 0
     cornerRadius: 0
     slideIn: true
-    borderSpec: Border.flat(Qt.alpha(Commons.Color.popups.text, 0.15), 1)
+    borderSpec: root.holo ? Border.flat("transparent", 0) : Border.flat(Qt.alpha(Commons.Color.popups.text, 0.15), 1)
     // With frosted glass on (the overview's setting, shared with this
     // panel), translucent so the compositor's blur shows through; cards stay
     // opaque on top of it.
-    surfaceColor: Qt.alpha(Commons.Color.popups.background, root.setting("frost", true) !== false ? 0.72 : 1)
+    surfaceColor: root.holo ? "transparent" : Qt.alpha(Commons.Color.popups.background, root.setting("frost", true) !== false ? 0.72 : 1)
     contentWidth: popup.fittedContentWidth(Style.space(root.panelWidth))
     // A column down the whole side of the screen, from under the bar to the
     // bottom, whatever it holds. A listHeight setting still opts back into a
@@ -713,7 +764,7 @@ Panel {
 
     Behavior on contentHeight {
       enabled: root.opened && root.listHeight > 0
-      NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+      NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutCubic }
     }
 
     // The stock omarchy bar window is only as tall as the bar strip, so the
@@ -733,8 +784,8 @@ Panel {
       anchors.fill: parent
       // While the search field has the focus it owns every key, including the
       // ones this would otherwise read as navigation.
-      blocked: search.inputActiveFocus || root.editingSettings || moreMenu.visible
-      onCloseRequested: root.searching ? root.endSearch() : root.close()
+      blocked: search.activeFocus || root.editingSettings || moreMenu.visible
+      onCloseRequested: root.stepBack()
       onMoveRequested: function(dx, dy) { root.moveCursor(dx, dy) }
       onActivateRequested: root.activateCursor(false)
       onDeleteRequested: root.activateCursor(true)
@@ -784,6 +835,33 @@ Panel {
         }
       }
 
+      // The holographic theme's shared panel (see quokecola.hud).
+      // Bleeding past the top like every other side puts the frame's full density
+      // behind the header. The clip is what keeps it off the bar, and takes the
+      // frame's top marks with it.
+      Item {
+        id: holoClip
+        readonly property int bleed: holoFrame.item ? holoFrame.item.pad : 0
+        anchors.fill: parent
+        anchors.leftMargin: -bleed
+        anchors.rightMargin: -bleed
+        anchors.bottomMargin: -bleed
+        clip: root.holo
+        Loader {
+          id: holoFrame
+          anchors.fill: parent
+          anchors.topMargin: -holoClip.bleed
+          source: Qt.resolvedUrl("../../quokecola.hud/holo/HoloFrame.qml")
+        }
+      }
+      // The frame's side marks land on whichever section line is showing.
+      Binding {
+        target: holoFrame.item
+        when: !!holoFrame.item
+        property: "dividerY"
+        value: holoClip.bleed + (root.editingSettings ? settingsPane.ruleY : header.height - 1)
+      }
+
       Column {
         id: content
         anchors.fill: parent
@@ -801,7 +879,31 @@ Panel {
             anchors.bottom: parent.bottom
             width: parent.width
             height: 1
-            color: Qt.alpha(root.foreground, 0.12)
+            color: root.sectionLine
+          }
+
+          Repeater {
+            model: root.confirmAll ? 1 : 0
+            NotificationConfirm {
+              objectName: "notificationClearConfirm"
+              required property int index
+              readonly property var question: Model.clearAllQuestion(root.entries.length)
+              anchors.left: header.left
+              anchors.leftMargin: Style.space(16)
+              anchors.right: header.right
+              anchors.rightMargin: Style.space(12)
+              anchors.verticalCenter: header.verticalCenter
+              height: implicitHeight
+              message: question.message
+              actionLabel: question.action
+              foreground: root.foreground
+              danger: root.confirmInk
+              fontFamily: root.copyFamily
+              messageSize: root.holo ? Style.font.body : Style.font.caption
+              buttonSize: root.holo ? Style.font.bodySmall : Style.font.caption
+              onConfirmed: root.answerConfirm()
+              onKept: root.dropConfirm()
+            }
           }
 
           Column {
@@ -810,30 +912,33 @@ Panel {
             anchors.leftMargin: Style.space(16)
             width: Math.max(0, searchControl.x - x - Style.space(8))
             opacity: root.searching ? 0 : 1
-            visible: opacity > 0
-            Behavior on opacity { NumberAnimation { duration: 100 } }
+            visible: opacity > 0 && !root.confirmAll
+            Behavior on opacity { NumberAnimation { duration: Style.duration(100) } }
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(2)
             Text {
               textFormat: Text.PlainText
               width: parent.width
               elide: Text.ElideRight
-              text: root.tr("Notifications")
+              text: "Notifications"
               font.bold: true
               color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
+              font.family: root.copyFamily
+              font.pixelSize: root.holo ? Style.font.title : Style.font.body
             }
             Text {
               textFormat: Text.PlainText
               width: parent.width
               elide: Text.ElideRight
+              objectName: "notificationSubtitle"
               text: {
-                if (root.dnd) return root.tr("Do not disturb")
+                if (root.holo && root.headerKeys) return "\u2190 \u2192 move  \u2193 list  Enter select"
+                if (root.holo && root.keyboardNavigation) return "\u2191 actions  Enter open  x dismiss"
                 var count = Model.unreadState(root.entries, root.readMark).unread
-                return root.tr(count === 1 ? "1 unread" : "%1 unread", count)
+                if (root.dnd) return root.holo ? "Do not disturb \u00B7 " + count + " unread" : "Do not disturb"
+                return count + " unread"
               }
-              color: Util.alpha(root.foreground, 0.6)
+              color: root.dimText
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
             }
@@ -841,25 +946,27 @@ Panel {
 
           Row {
             id: actions
+            visible: !root.confirmAll
             anchors.right: parent.right
             anchors.rightMargin: Style.space(12)
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(4)
 
             NotificationAction {
+              id: clearButton
               objectName: "clearAllNotifications"
               iconName: "trash"
-              tooltipText: root.tr("Clear all notifications")
+              tooltipText: "Clear all notifications"
               foreground: Qt.alpha(root.foreground, 0.65)
               hoverForeground: Commons.Color.urgent
               enabled: root.entries.length > 0
-              onClicked: root.clearAll()
+              onClicked: root.requestClearAll()
             }
             NotificationAction {
               id: moreButton
               objectName: "notificationMore"
               iconName: "more"
-              tooltipText: root.tr("More options")
+              tooltipText: "More options"
               foreground: Qt.alpha(root.foreground, 0.65)
               onClicked: moreMenu.visible ? moreMenu.close() : moreMenu.open()
             }
@@ -878,13 +985,13 @@ Panel {
             Controls.MenuItem {
               id: muteItem
               objectName: "notificationMute"
-              text: root.dnd ? root.tr("Allow notifications") : root.tr("Silence notifications")
+              text: root.dnd ? "Allow notifications" : "Silence notifications"
               enabled: !!root.store && !root.store.dndBusy
               implicitHeight: Style.space(42)
               contentItem: RowLayout {
                 spacing: Style.space(10)
                 NotificationAction { iconName: root.dnd ? "bellOff" : "bell"; size: Style.space(24); foreground: root.dnd ? Commons.Color.accent : root.foreground; enabled: false; opacity: 1; Accessible.ignored: true }
-                Text { text: muteItem.text; textFormat: Text.PlainText; font.family: root.fontFamily; font.pixelSize: Style.font.caption; color: root.foreground; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                Text { text: muteItem.text; textFormat: Text.PlainText; font.family: root.copyFamily; font.pixelSize: Style.font.caption; color: root.foreground; Layout.fillWidth: true; wrapMode: Text.WordWrap }
               }
               background: Rectangle { color: muteItem.highlighted ? Qt.alpha(root.foreground, 0.08) : "transparent"; radius: Style.cornerRadius * 2 }
               onTriggered: root.toggleDnd()
@@ -892,12 +999,12 @@ Panel {
             Controls.MenuItem {
               id: settingsItem
               objectName: "notificationSettings"
-              text: root.tr("Settings")
+              text: "Settings"
               implicitHeight: Style.space(42)
               contentItem: RowLayout {
                 spacing: Style.space(10)
                 NotificationAction { iconName: "settings"; size: Style.space(24); foreground: root.foreground; enabled: false; opacity: 1; Accessible.ignored: true }
-                Text { text: settingsItem.text; textFormat: Text.PlainText; font.family: root.fontFamily; font.pixelSize: Style.font.caption; color: root.foreground; Layout.fillWidth: true }
+                Text { text: settingsItem.text; textFormat: Text.PlainText; font.family: root.copyFamily; font.pixelSize: Style.font.caption; color: root.foreground; Layout.fillWidth: true }
               }
               background: Rectangle { color: settingsItem.highlighted ? Qt.alpha(root.foreground, 0.08) : "transparent"; radius: Style.cornerRadius * 2 }
               onTriggered: root.openSettings()
@@ -906,6 +1013,7 @@ Panel {
 
           Rectangle {
             id: searchControl
+            visible: !root.confirmAll
             anchors.right: actions.left
             anchors.rightMargin: Style.space(4)
             anchors.verticalCenter: parent.verticalCenter
@@ -913,20 +1021,20 @@ Panel {
             height: Style.space(32)
             radius: Math.min(Style.space(7), Style.cornerRadius)
             color: root.searching ? Qt.alpha(root.foreground, 0.055) : "transparent"
-            border.width: search.inputActiveFocus ? 1 : 0
+            border.width: search.activeFocus ? 1 : 0
             border.color: Commons.Color.accent
             // Clipping this rounded surface cuts off its antialiased focus outline.
             antialiasing: true
             border.pixelAligned: false
-            Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+            Behavior on width { NumberAnimation { duration: Style.duration(160); easing.type: Easing.OutCubic } }
 
             NotificationAction {
               iconName: "search"
-              tooltipText: root.tr("Search notifications  ( / )")
+              tooltipText: "Search notifications  ( / )"
               foreground: root.searching ? Commons.Color.accent : Qt.alpha(root.foreground, 0.65)
               onClicked: root.startSearch()
             }
-            SafeTextField {
+            TextField {
               id: search
               objectName: "notificationSearch"
               x: Style.space(32)
@@ -934,18 +1042,19 @@ Panel {
               height: parent.height
               visible: root.searching
               enabled: root.searching
-              placeholderText: root.tr("Search")
-              color: root.foreground
+              placeholderText: "Search"
+              foreground: root.foreground
               placeholderTextColor: Qt.alpha(root.foreground, 0.45)
-              selectionColor: Qt.alpha(Commons.Color.accent, 0.3)
-              selectedTextColor: root.foreground
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
-              padding: 0
+              leftPadding: 0
+              rightPadding: 0
+              topPadding: 0
+              bottomPadding: 0
+              verticalAlignment: TextInput.AlignVCenter
               background: Item {}
               onTextChanged: root.filter = text
-              translate: root.tr
-              onKeyPressed: function(event) {
+              Keys.onPressed: function(event) {
                 if (event.key === Qt.Key_Escape) { event.accepted = true; root.endSearch() }
                 else if (event.key === Qt.Key_Down) {
                   event.accepted = true
@@ -965,7 +1074,7 @@ Panel {
               anchors.right: parent.right
               visible: root.searching
               iconName: "close"
-              tooltipText: root.tr("Close search  ( Esc )")
+              tooltipText: "Close search  ( Esc )"
               foreground: Qt.alpha(root.foreground, 0.65)
               onClicked: root.endSearch()
             }
@@ -977,11 +1086,11 @@ Panel {
           x: Style.space(14)
           width: parent.width - Style.space(28)
           textFormat: Text.PlainText
-          text: search.pasteError || (root.store ? root.tr(root.store.dndError || (root.store.focusError || root.store.loadError || root.store.removalError)) : "")
+          text: root.store ? root.store.dndError || root.store.focusError || root.store.loadError || root.store.removalError : ""
           visible: !root.editingSettings && text !== ""
-          color: Commons.Color.urgent
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
+          color: root.errorText
+          font.family: root.copyFamily
+          font.pixelSize: root.holo ? Style.font.body : Style.font.caption
           wrapMode: Text.WordWrap
         }
 
@@ -1071,8 +1180,8 @@ Panel {
                 Component.onDestruction: list.unregisterRow(rowId, delegateRoot)
                 SequentialAnimation {
                   id: unstackMotion
-                  PauseAnimation { duration: Math.max(0, Math.min(delegateRoot.stackDepth - 1, 5)) * 30 }
-                  NumberAnimation { target: delegateRoot; property: "reveal"; to: 1; duration: 340; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.8, 0, 0.2, 1, 1, 1] }
+                  PauseAnimation { duration: Style.duration(Math.max(0, Math.min(delegateRoot.stackDepth - 1, 5)) * 30) }
+                  NumberAnimation { target: delegateRoot; property: "reveal"; to: 1; duration: Style.duration(340); easing.type: Easing.BezierSpline; easing.bezierCurve: [0.8, 0, 0.2, 1, 1, 1] }
                 }
                 ListView.delayRemove: root.popupContentActive && (exitMotion.running || stackMotion.running)
                 ListView.onRemove: {
@@ -1088,16 +1197,16 @@ Panel {
                 }
                 SequentialAnimation {
                   id: exitMotion
-                  NumberAnimation { target: delegateRoot; property: "opacity"; to: 0; duration: 120; easing.type: Easing.OutCubic }
+                  NumberAnimation { target: delegateRoot; property: "opacity"; to: 0; duration: Style.duration(120); easing.type: Easing.OutCubic }
                   // Let ListView lay out the shrinking space, including its scroll extent.
-                  NumberAnimation { target: delegateRoot; property: "height"; to: 0; duration: 140; easing.type: Easing.OutCubic }
+                  NumberAnimation { target: delegateRoot; property: "height"; to: 0; duration: Style.duration(140); easing.type: Easing.OutCubic }
                 }
                 SequentialAnimation {
                   id: stackMotion
                   // Deeper cards set off first, so each one goes behind a card
                   // that is still there to hide it.
-                  PauseAnimation { duration: Math.max(0, 4 - Math.min(delegateRoot.stackDepth - 1, 4)) * 20 }
-                  NumberAnimation { target: delegateRoot; property: "reveal"; to: 0; duration: 300; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.8, 0, 0.2, 1, 1, 1] }
+                  PauseAnimation { duration: Style.duration(Math.max(0, 4 - Math.min(delegateRoot.stackDepth - 1, 4)) * 20) }
+                  NumberAnimation { target: delegateRoot; property: "reveal"; to: 0; duration: Style.duration(300); easing.type: Easing.BezierSpline; easing.bezierCurve: [0.8, 0, 0.2, 1, 1, 1] }
                 }
                 width: list.width
                 height: rowLoader.implicitHeight * reveal
@@ -1136,16 +1245,22 @@ Panel {
                     compact: root.compact
                     group: delegateRoot.modelData.group
                     expanded: delegateRoot.modelData.expanded
-                    language: root.language
                     now: root.now
                     readMark: root.readMark
                     foreground: root.foreground
                     fontFamily: root.fontFamily
+                    holo: root.holo
+                    copyFamily: root.copyFamily
+                    danger: root.confirmInk
+                    confirming: root.confirmGroup !== "" && root.confirmGroup === group.key
                     hasCursor: root.keyboardNavigation && root.cursorIndex === delegateRoot.index
                     dismissHasCursor: hasCursor && root.cursorDismiss
                     onPointerUsed: root.keyboardNavigation = false
                     onToggleRequested: root.toggleGroup(group.key)
-                    onRemoveRequested: root.removeGroup(group)
+                    onRemoveRequested: root.requestRemoveGroup(group)
+                    onConfirmed: root.answerConfirm()
+                    onKept: root.dropConfirm()
+                    Component.onDestruction: if (confirming) root.confirmTargetGone(group.key)
                   }
                 }
                 Component {
@@ -1162,9 +1277,11 @@ Panel {
                     expanded: delegateRoot.modelData.expanded
                     groupCritical: delegateRoot.modelData.group.critical
                     groupEntries: delegateRoot.modelData.group.entries
-                    accent: root.tintFor(delegateRoot.modelData.group)
+                    accent: root.holo ? Commons.Color.urgent : root.tintFor(delegateRoot.modelData.group)
+                    holo: root.holo
+                    copyFamily: root.copyFamily
+                    readMark: root.readMark
                     settle: delegateRoot.reveal
-                    language: root.language
                     now: root.now
                     showBody: root.showBody
                     showPreview: root.showPreview
@@ -1196,14 +1313,17 @@ Panel {
           horizontalAlignment: Text.AlignHCenter
           topPadding: Style.space(22)
           bottomPadding: Style.space(22)
-          text: !root.loaded ? root.tr("Reading the archive…")
-              : root.filter !== "" ? root.tr("Nothing matches “%1”", root.filter)
-              : root.tr("Nothing has come in yet")
+          objectName: "notificationEmptyState"
+          text: root.holo
+              ? Model.emptyCopy(root.loaded, root.filter, root.store ? root.store.loadError : "")
+              : !root.loaded ? "Reading the archive…"
+              : root.filter !== "" ? "Nothing matches “" + root.filter + "”"
+              : "Nothing has come in yet"
           wrapMode: Text.WordWrap
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          color: root.foreground
-          opacity: 0.55
+          font.family: root.copyFamily
+          font.pixelSize: root.holo ? Style.font.body : Style.font.caption
+          color: root.holo ? root.dimText : root.foreground
+          opacity: root.holo ? 1 : 0.55
         }
 
         SettingsPane {
@@ -1213,17 +1333,12 @@ Panel {
           height: Math.min(implicitHeight, Math.max(Style.space(100), popup.usableCardHeight - popup.verticalContentInset - Style.space(10)))
           visible: root.editingSettings
           settings: root.settings
-          popupSettings: root.popupSettings
-          popupInstalled: root.popupPluginInstalled
-          popupAvailable: root.popupPluginInstalled && root.popupSettingsAvailable
-          loading: root.popupSettingsLoading
           saving: root.preferenceActive !== null
+          holo: root.holo
+          monoFamily: root.fontFamily
           error: root.settingsError
-          language: root.language
-          onSave: function(scope, key, value) { root.savePreference(scope, key, value) }
+          onSave: function(key, value) { root.savePreference(key, value) }
           onBack: root.closeSettings()
-          onClearError: root.settingsError = ""
-          onPasteFailed: function(message) { root.settingsError = message }
         }
 
       }

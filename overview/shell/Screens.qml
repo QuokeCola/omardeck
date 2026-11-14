@@ -1,7 +1,8 @@
 import QtQuick
-import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
+import "../app/Desks.js" as Desks
+import "../app/HyprLua.js" as HyprLua
 
 // Every screen as one desktop, kept that way as screens come and go.
 //
@@ -26,7 +27,7 @@ import Quickshell.Hyprland
 Item {
   id: screens
 
-  property bool enabled: false
+  property alias active: keys.active
 
   // Windows folded away from a screen that went, by address: the screen, by
   // its description (a dock can hand it another connector name next time),
@@ -49,7 +50,7 @@ Item {
     }
   }
 
-  function soon() { if (screens.enabled) settle.restart() }
+  function soon() { if (screens.active) settle.restart() }
 
   // ------------------------------------------------ one screen went somewhere
 
@@ -67,84 +68,16 @@ Item {
     id: follow
     interval: 150
     onTriggered: {
-      if (!screens.enabled || settle.running) return
+      if (!screens.active || settle.running) return
       screens.followFocus = true
       screens.look()
     }
   }
 
-  onEnabledChanged: {
+  onActiveChanged: {
     screens.soon()
-    if (screens.enabled) screens.bindKeys()
-    else if (screens.bound) {
-      // Back to whatever the config binds to the number keys.
-      screens.bound = false
-      unbinder.running = true
-    }
-  }
-
-  // ------------------------------------------------------- the number keys
-
-  // SUPER + number switches every screen to that desktop (see app/synced.lua),
-  // loaded into Hyprland's Lua while the setting is on.
-  readonly property string keysFile: {
-    const url = Qt.resolvedUrl("../app/synced.lua").toString()
-    return url.startsWith("file://") ? url.slice(7) : url
-  }
-  property bool bound: false
-  property bool bindAgain: false
-  property int checksLeft: 0
-
-  function bindKeys() {
-    if (!screens.enabled) return
-    if (binder.running) { screens.bindAgain = true; return }
-    const path = screens.keysFile.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-    binder.command = ["/usr/bin/hyprctl", "eval", 'dofile("' + path + '")']
-    binder.running = true
-  }
-
-  Process {
-    id: binder
-    onExited: (code) => {
-      if (code === 0) screens.bound = true
-      if (screens.bindAgain) {
-        screens.bindAgain = false
-        screens.bindKeys()
-        return
-      }
-      // A reload can land after this without its event reaching us (a
-      // monitor daemon at login): look a few times whether they are still
-      // there, as the gestures do.
-      screens.checksLeft = 5
-      keysCheck.restart()
-    }
-  }
-
-  Timer {
-    id: keysCheck
-    interval: 2000
-    onTriggered: if (screens.enabled && !binder.running && !keysProbe.running) keysProbe.running = true
-  }
-
-  Process {
-    id: keysProbe
-    command: ["/usr/bin/hyprctl", "eval", 'if not _G.__omardeck_synced then error("omardeck: keys gone") end']
-    onExited: (code) => {
-      if (code !== 0) screens.bindKeys()
-      else if (--screens.checksLeft > 0) keysCheck.restart()
-    }
-  }
-
-  // A reload forgets them; after one has settled, bind them again.
-  Timer {
-    id: rebind
-    interval: 600
-    onTriggered: screens.bindKeys()
-  }
-
-  Process {
-    id: unbinder
-    command: ["/usr/bin/hyprctl", "reload"]
+    if (screens.active) screens.bindKeys()
+    else screens.unbindKeys()
   }
 
   Connections {
@@ -155,9 +88,10 @@ Item {
           || name === "monitorremoved" || name === "monitorremovedv2"
           || name === "configreloaded")
         screens.soon()
-      else if (screens.enabled && (name === "workspacev2" || name === "workspace"))
+      else if (screens.active && (name === "workspacev2" || name === "workspace"))
         follow.restart()
-      if (name === "configreloaded" && screens.enabled) rebind.restart()
+      // A reload forgets the number keys; after one has settled, bind them again.
+      if (name === "configreloaded" && screens.active) keys.loadSoon()
     }
   }
 
@@ -165,17 +99,12 @@ Item {
     id: query
     command: ["/usr/bin/hyprctl", "-j", "--batch", "monitors; clients"]
     stdout: StdioCollector {
-      onStreamFinished: {
-        const answers = text.split("\n\n\n").map(s => { try { return JSON.parse(s) } catch (e) { return null } })
-        const lead = screens.followFocus ? "focused" : "laptop"
-        screens.followFocus = false
-        if (Array.isArray(answers[0]) && Array.isArray(answers[1])) screens.align(answers[0], answers[1], lead)
-      }
+      onStreamFinished: screens.takeAnswer(text)
     }
   }
 
   function look() {
-    if (!screens.enabled) return
+    if (!screens.active) return
     if (query.running) {
       if (screens.followFocus) {
         screens.followFocus = false
@@ -186,106 +115,57 @@ Item {
     query.running = true
   }
 
-  /** The laptop's panel first, then the others left to right. */
-  function ordered(monitors) {
-    return monitors.filter(m => !m.disabled).slice().sort((a, b) => {
-      const al = /^eDP/.test(a.name), bl = /^eDP/.test(b.name)
-      if (al !== bl) return al ? -1 : 1
-      return a.x - b.x
-    })
+  function takeAnswer(text) {
+    const answers = text.split("\n\n\n").map(s => { try { return JSON.parse(s) } catch (e) { return null } })
+    const lead = screens.followFocus ? "focused" : "laptop"
+    screens.followFocus = false
+    if (Array.isArray(answers[0]) && Array.isArray(answers[1])) screens.align(answers[0], answers[1], lead)
   }
 
-  function screenId(m) { return String(m.description || m.name) }
-
+  /** The windows to their workspaces and every screen to the desktop of the
+      laptop — or, with `lead` "focused", of the screen in use — all in one go,
+      with the pointer left where it is. */
   function align(monitors, clients, lead) {
-    const order = screens.ordered(monitors)
-    if (order.length === 0) return
-    const index = ({})
-    order.forEach((m, i) => { index[m.id] = i })
-    const byId = order.map(m => screens.screenId(m))
-    const before = screens.lastOrder
-    const kept = Object.assign({}, screens.folded)
-    const moves = []
+    const plan = Desks.planFold(monitors, clients, screens.folded, screens.lastOrder)
+    if (!plan) return
+    screens.folded = plan.folded
+    screens.lastOrder = plan.lastOrder
 
-    for (const c of clients) {
-      const ws = c.workspace ? c.workspace.id : 0
-      const key = String(c.address || "").replace(/^0x/, "")
-      if (!(ws > 0) || !/^[0-9a-fA-F]+$/.test(key)) continue
-      const here = index[c.monitor]
-      if (here === undefined) continue
-      const desk = (ws - 1) % 10 + 1
-
-      // Back to the screen it was folded away from, if that screen is back
-      // and the window is still where it was folded to.
-      const away = kept[key]
-      if (away) {
-        const home = byId.indexOf(away.screen)
-        if (ws !== away.ws) {
-          delete kept[key]
-        } else if (home >= 0 && home !== here) {
-          moves.push({ key: key, ws: away.desk + 10 * home })
-          delete kept[key]
-          continue
-        }
-      }
-
-      const want = desk + 10 * here
-      if (ws === want) continue
-      // Outside this screen's block: from a screen that is gone, remember
-      // which, so it can go back.
-      const from = before[Math.floor((ws - 1) / 10)]
-      if (from && byId.indexOf(from) < 0) kept[key] = { screen: from, desk: desk, ws: want }
-      moves.push({ key: key, ws: want })
-    }
-
-    // Forget windows that have closed.
-    const alive = ({})
-    for (const c of clients) alive[String(c.address || "").replace(/^0x/, "")] = true
-    for (const key in kept) if (!alive[key]) delete kept[key]
-
-    screens.folded = kept
-    screens.lastOrder = byId
-    screens.run(order, moves, lead)
+    const to = Desks.deskToShow(plan.order, lead)
+    if (!to.lagging && plan.moves.length === 0) return
+    dispatch.command = ["/usr/bin/hyprctl", "eval", HyprLua.alignScript(plan.order, plan.moves, to.desk, to.focused.name)]
+    dispatch.running = true
   }
 
   Process { id: dispatch }
 
-  /** The windows to their workspaces and every screen to the desktop of the
-      laptop — or, with `lead` "focused", of the screen in use — all in one
-      go, with the pointer left where it is. */
-  function run(order, moves, lead) {
-    const laptop = order[0]
-    const leader = lead === "focused" ? (order.find(m => m.focused) || laptop) : laptop
-    const shown = leader.activeWorkspace && leader.activeWorkspace.id > 0 ? leader.activeWorkspace.id : 1
-    const desk = Number.isInteger(shown) ? (shown - 1) % 10 + 1 : 1
-    const lagging = order.some((m, i) => !m.activeWorkspace || m.activeWorkspace.id !== desk + 10 * i)
-    if (!lagging && moves.length === 0) return
+  // ------------------------------------------------------- the number keys
 
-    const focused = order.find(m => m.focused) || laptop
-    let lua = "local w = hl.get_config('cursor.no_warps'); hl.config({ cursor = { no_warps = true } }); "
-    // A window can only be sent to a workspace on a screen that has it: one
-    // not made yet is made wherever focus is, and an empty one is gone again
-    // as soon as focus leaves it. So on each screen with windows coming, each
-    // of their workspaces is made there and filled before moving on.
-    const into = ({})
-    for (const m of moves) (into[m.ws] = into[m.ws] || []).push(m.key)
-    order.forEach((m, i) => {
-      if (!/^[A-Za-z0-9_-]+$/.test(m.name)) return
-      lua += "hl.dispatch(hl.dsp.focus({ monitor = '" + m.name + "' })); "
-      for (const ws in into) {
-        if (!/^[0-9]+$/.test(ws) || Math.floor((ws - 1) / 10) !== i) continue
-        lua += "hl.dispatch(hl.dsp.focus({ workspace = '" + ws + "', on_current_monitor = true })); "
-        // Moving a window hands focus back to the screen it left.
-        for (const key of into[ws])
-          lua += "hl.dispatch(hl.dsp.window.move({ window = 'address:0x" + key + "', workspace = '" + ws + "', follow = false })); "
-               + "hl.dispatch(hl.dsp.focus({ monitor = '" + m.name + "' })); "
-      }
-      lua += "hl.dispatch(hl.dsp.focus({ workspace = '" + (desk + 10 * i) + "', on_current_monitor = true })); "
-    })
-    if (/^[A-Za-z0-9_-]+$/.test(focused.name))
-      lua += "hl.dispatch(hl.dsp.focus({ monitor = '" + focused.name + "' })); "
-    lua += "hl.config({ cursor = { no_warps = w } })"
-    dispatch.command = ["/usr/bin/hyprctl", "eval", lua]
-    dispatch.running = true
+  // SUPER + number switches every screen to that desktop (see app/synced.lua),
+  // loaded into Hyprland's Lua while the setting is on. Off until asked: `active`
+  // is an alias of this module's, so it is already set when onActiveChanged loads.
+  LuaModule {
+    id: keys
+    file: Qt.resolvedUrl("../app/synced.lua")
+    guard: "__omardeck_synced"
+    goneMessage: "omardeck: keys gone"
+    active: false
+    onEvaluated: (code) => { if (code === 0) screens.bound = true }
+  }
+
+  property bool bound: false
+
+  function bindKeys() { keys.load() }
+
+  // Back to whatever the config binds to the number keys.
+  function unbindKeys() {
+    if (!screens.bound) return
+    screens.bound = false
+    unbinder.running = true
+  }
+
+  Process {
+    id: unbinder
+    command: ["/usr/bin/hyprctl", "reload"]
   }
 }

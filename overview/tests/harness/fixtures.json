@@ -1,0 +1,41 @@
+{
+  "monitors": [
+    { "id": 0, "name": "screen", "description": "Laptop panel", "x": 0, "y": 0, "width": 1600, "height": 1000, "scale": 1.0,
+      "activeWorkspace": { "id": 1, "name": "1" }, "specialWorkspace": { "id": 0, "name": "" },
+      "reserved": [0, 30, 0, 0], "focused": true, "disabled": false }
+  ],
+  "workspaces": [
+    { "id": 1, "name": "1", "monitor": "screen", "monitorID": 0, "windows": 2, "hasfullscreen": false, "lastwindow": "0xa1", "lastwindowtitle": "term" },
+    { "id": 2, "name": "2", "monitor": "screen", "monitorID": 0, "windows": 1, "hasfullscreen": false, "lastwindow": "0xa3", "lastwindowtitle": "web" }
+  ],
+  "activeworkspace": { "id": 1, "name": "1" },
+  "clients": [
+    { "address": "0xa1", "mapped": true, "hidden": false, "at": [12, 42], "size": [780, 940], "workspace": { "id": 1, "name": "1" },
+      "floating": false, "monitor": 0, "class": "foot", "title": "term", "focusHistoryID": 0, "tags": [] },
+    { "address": "0xa2", "mapped": true, "hidden": false, "at": [806, 42], "size": [780, 940], "workspace": { "id": 1, "name": "1" },
+      "floating": true, "monitor": 0, "class": "org.gnome.Nautilus", "title": "files", "focusHistoryID": 1, "tags": [] },
+    { "address": "0xa3", "mapped": true, "hidden": false, "at": [12, 42], "size": [1576, 940], "workspace": { "id": 2, "name": "2" },
+      "floating": false, "monitor": 0, "class": "chromium", "title": "web", "focusHistoryID": 2, "tags": [] }
+  ],
+  "options": {
+    "decoration:rounding": { "option": "decoration:rounding", "int": 8, "set": true },
+    "decoration:active_opacity": { "option": "decoration:active_opacity", "float": 0.95, "set": true },
+    "decoration:inactive_opacity": { "option": "decoration:inactive_opacity", "float": 0.9, "set": true },
+    "general:border_size": { "option": "general:border_size", "int": 2, "set": true },
+    "general:col.active_border": { "option": "general:col.active_border", "gradient": "ff33ccff 45deg", "set": true },
+    "general:col.inactive_border": { "option": "general:col.inactive_border", "gradient": "143a332a0deg", "set": true },
+    "decoration:shadow:enabled": { "option": "decoration:shadow:enabled", "bool": true, "set": true },
+    "decoration:shadow:range": { "option": "decoration:shadow:range", "int": 12, "set": true },
+    "decoration:shadow:color": { "option": "decoration:shadow:color", "color": "ee1a1a1a", "set": true },
+    "decoration:shadow:color_inactive": { "option": "decoration:shadow:color_inactive", "color": "ffffffff", "set": false },
+    "decoration:shadow:offset": { "option": "decoration:shadow:offset", "vec2": [2, 4], "set": true },
+    "decoration:blur:enabled": { "option": "decoration:blur:enabled", "bool": true, "set": true },
+    "decoration:blur:size": { "option": "decoration:blur:size", "int": 6, "set": true },
+    "decoration:blur:passes": { "option": "decoration:blur:passes", "int": 2, "set": true }
+  },
+  "getprop": {
+    "0xa1": { "opacity": 0.9, "opacity_override": false, "opacity_inactive": 0.8, "opacity_inactive_override": false, "no_shadow": true },
+    "0xa2": { "opacity": 1, "opacity_override": false, "opacity_inactive": 0.8, "opacity_inactive_override": false, "no_shadow": false },
+    "0xa3": { "opacity": 1, "opacity_override": false, "opacity_inactive": 0.6, "opacity_inactive_override": true, "no_shadow": false }
+  }
+}

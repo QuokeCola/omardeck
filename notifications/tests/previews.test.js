@@ -247,21 +247,21 @@ test('progressive JPEG bombs and corrupt icons are rejected without losing notif
   assert.deepEqual(fs.readdirSync(path.join(f.store,'images')), []);
 });
 
-test('first list migrates retained legacy images before exposing them, without their sources', t => {
+test('first list drops unconverted legacy images before exposing them, keeping the text and theme icons', t => {
   const f = fixture(t);
   f.run('list');
   const timestamp = Date.now(), key = `${timestamp}-41`;
-  const original = f.image('old-icon.jpg', '-size', '1200x900', 'xc:green', '-interlace', 'Plane');
   const legacy = path.join(f.store, 'images', `${key}-appIcon`);
-  fs.copyFileSync(original, legacy);fs.unlinkSync(original);
-  const row = {key,timestamp,app:'Old app',summary:'Retained notification',appIcon:`file://${legacy}`,image:`file://${legacy}`,preview:'',file:'/tmp/original-picture.jpg',sourceHash:'old',assetsHash:'old'};
-  fs.writeFileSync(path.join(f.store, 'archive.jsonl'), JSON.stringify(row)+'\n');
-  const result = JSON.parse(f.run('list').stdout)[0];
+  const row = {key,timestamp,app:'Old app',summary:'Retained notification',appIcon:`file://${legacy}`,image:`file://${legacy}`,preview:legacy,file:'/tmp/original-picture.jpg',sourceHash:'old',assetsHash:'old'};
+  const themed = {key:`${timestamp}-42`,timestamp,app:'Old app',summary:'Themed',appIcon:'org.gnome.Nautilus',image:'/tmp/raw.jpg'};
+  const current = {key:`${timestamp}-43`,timestamp,summary:'Current',imageFormat:1,appIcon:'file:///store/images/x-appIcon.png',preview:'file:///store/images/x-preview.png'};
+  fs.writeFileSync(path.join(f.store, 'archive.jsonl'), [row,themed,current].map(JSON.stringify).join('\n')+'\n');
+  const byKey = new Map(JSON.parse(f.run('list').stdout).map(r => [r.key, r]));
+  const result = byKey.get(key);
   assert.equal(result.summary, row.summary);assert.equal(result.file,row.file);
-  for (const slot of ['appIcon','image']) assert.equal(inspect(result[slot]),'PNG 720x540 1');
-  assert.equal(result.imageFormat,1);assert.equal(fs.existsSync(legacy),false);
-  const before=fs.statSync(result.appIcon.slice(7),{bigint:true}).mtimeNs;
-  f.run('list');f.run();assert.equal(fs.statSync(result.appIcon.slice(7),{bigint:true}).mtimeNs,before);
+  for (const slot of ['appIcon','image','preview']) assert.equal(result[slot],'');
+  assert.equal(byKey.get(themed.key).appIcon,'org.gnome.Nautilus');assert.equal(byKey.get(themed.key).image,'');
+  assert.deepEqual(byKey.get(current.key),current);
 });
 
 test('legacy rejected images and provider URLs never escape through list', t => {
@@ -287,7 +287,7 @@ test('decoder memory allocations outside its pixel cache remain bounded for app 
   assert.deepEqual(fs.readdirSync(path.join(f.store,'images')),[]);
 });
 
-test('concurrent first loads migrate once and retain valid images after source cleanup', async t => {
+test('concurrent first loads disarm once and agree', async t => {
   const f=fixture(t);f.run('list');
   const timestamp=Date.now(),key=`${timestamp}-44`;
   const image=f.image('legacy.jpg','-size','128x64','xc:red','-interlace','Plane');
@@ -300,6 +300,6 @@ test('concurrent first loads migrate once and retain valid images after source c
     });
   }
   const [a,b]=await Promise.all([list(),list()]);assert.deepEqual(a,b);
-  assert.equal(inspect(a[0].appIcon),'PNG 128x64 1');
+  assert.equal(a[0].appIcon,'');assert.equal(a[0].summary,'Keep');
   assert.equal(f.entries().length,1);
 });

@@ -6,10 +6,17 @@ Omarchy shell service plugin (`quokecola.dock`): a bottom dock with pinned and
 running apps.
 
 - Pinned apps, then running apps that aren't pinned (after a divider)
-- Up to three dots per app for open windows; the focused app's dots use the accent color
+- Up to three dots per app for open windows; the focused app's dots use the accent color.
+  Under the death-stranding theme they are ticks that read by length: focused long,
+  running short, minimized a point
 - Smart auto-hide: hides only while a window on that monitor's visible workspace
   covers the dock (or one is fullscreen); touch the bottom edge to reveal
-- Name tooltips, launch bounce, optional hover magnification
+- Name tooltips, launch bounce, optional hover magnification. Under the death-stranding
+  theme, with magnification off, hover draws the panels' cursor around the icon, and a
+  launch pulses the tick instead of the bounce
+- Clicks count all the way down to the screen edge
+- Follows `omarchy toggle animations`: with animations off nothing travels, and a
+  launch holds a tick or a dimmed icon instead
 - Left click: launch / focus (a window on another desktop: Aerial slides there,
   `slideToWindow: false` switches at once); with several windows, opens Aerial's overview on
   just that app's windows to pick one (`windowPicker: "cycle"` cycles instead). Middle click: new window.
@@ -39,9 +46,9 @@ Enable by adding `{ "id": "quokecola.dock" }` to `plugins` in
 `autohide`: `smart`, `always` or `never`. With `never` the dock keeps its strip of the screen, so tiled windows stop above it, and it hides only for a fullscreen window. `magnify`: hovered-icon scale, `1` turns it off. `height` sets the panel height
 independently of `iconSize`.
 
-The dock announces how much of each screen's bottom edge it covers on
-Hyprland's event socket as `custom>>dock-state,<monitor>,<px>` (0 when hidden);
-the Aerial fork lifts its desktop-swipe dots above it.
+The dock keeps how much of each screen's bottom edge it covers in `covers`, by
+monitor name (0 when hidden). The plugin hands that to the overview as
+`dockCovers`, which lifts its desktop dots above the dock.
 
 Blur: a Hyprland `layer_rule` for `omarchy-dock` with `blur = true` and
 `blur_popups = true` (the right-click menu is an xdg popup).

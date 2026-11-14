@@ -14,6 +14,8 @@
 -- Loaded by the shell (see Screens.qml), again after every config reload,
 -- which forgets these the same way it forgets the gestures.
 
+-- The block order, as orderMonitors in Desks.js has it: this runs inside Hyprland
+-- and cannot share it. tests/fold-test.js holds the two together.
 local function screens()
   local list = {}
   for _, m in ipairs(hl.get_monitors()) do
@@ -39,6 +41,11 @@ local function here(n)
   return n
 end
 
+-- This window to desktop n on the screen you are on, without going there.
+local function send(n)
+  hl.dispatch(hl.dsp.window.move({ workspace = tostring(here(n)), follow = false }))
+end
+
 for n = 1, 10 do
   local key = "code:" .. tostring(n + 9)
   hl.unbind("SUPER + " .. key)
@@ -48,11 +55,11 @@ for n = 1, 10 do
     hl.dispatch(hl.dsp.event("aerial,desk:" .. n))
   end, { description = "Switch all screens to desktop " .. n })
   hl.bind("SUPER + SHIFT + " .. key, function()
-    hl.dispatch(hl.dsp.window.move({ workspace = tostring(here(n)), follow = false }))
+    send(n)
     hl.dispatch(hl.dsp.event("aerial,desk:" .. n))
   end, { description = "Move window to desktop " .. n })
   hl.bind("SUPER + SHIFT + ALT + " .. key, function()
-    hl.dispatch(hl.dsp.window.move({ workspace = tostring(here(n)), follow = false }))
+    send(n)
   end, { description = "Move window silently to desktop " .. n })
 end
 

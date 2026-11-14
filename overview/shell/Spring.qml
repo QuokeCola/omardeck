@@ -53,18 +53,6 @@ FrameAnimation {
     if (!spring.running) spring.start()
   }
 
-  /** Start from `from` at `speed`, heading for `to`. */
-  function launch(from, to, speed) {
-    spring.value = from
-    spring.velocity = speed || 0
-    spring.target = to
-    if (spring.isSettled()) {
-      spring.finish()
-      return
-    }
-    if (!spring.running) spring.start()
-  }
-
   /** Stop where it is, keeping its speed for whoever picks it up next. */
   function hold() { spring.stop() }
 

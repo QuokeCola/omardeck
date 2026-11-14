@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Shapes
 import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
@@ -38,28 +39,48 @@ Item {
   // The window overview, handed in by the plugin; null without one.
   property var overview: null
 
+  // The holographic theme's look. `[holo]` keys exist only in its shell.toml, so
+  // under any other theme this is false and the plain branches below are the dock.
+  readonly property bool holo: Commons.Color.pick("holo.line", "") !== ""
+
+  // Omarchy minimizes a window by moving it here (omarchy-hyprland-window-minimize).
+  readonly property string minimizedWorkspace: "special:minimized"
+
   // ------------------------------------------------------------------ config
   readonly property string configPath: Quickshell.env("HOME") + "/.config/omarchy/dock.json"
   property var config: ({})
   readonly property var pinned: Array.isArray(config.pinned) ? config.pinned : []
   readonly property var classAliases: config.classAliases && typeof config.classAliases === "object" ? config.classAliases : ({})
   onClassAliasesChanged: { idCache = ({}); scheduleRebuild() }
-  readonly property int iconSize: Math.max(24, Number(config.iconSize) || 38)
+  // Under the holographic theme everything here is whole tiles: the config's icon size comes
+  // to the nearest, and the height follows from it (see dockHeight).
+  readonly property int tile: 6
+  readonly property int iconSize: {
+    const asked = Math.max(24, Number(config.iconSize) || 38)
+    return holo ? Math.round(asked / tile) * tile : asked
+  }
   readonly property real magnify: Math.max(1, Math.min(2, Number(config.magnify) || 1.45))
   readonly property bool slideToWindow: config.slideToWindow !== false
   readonly property string windowPicker: config.windowPicker === "cycle" ? "cycle" : "aerial"
   readonly property string autohide: ["smart", "always", "never"].indexOf(config.autohide) >= 0 ? config.autohide : "smart"
 
   // The panel's height is set on its own, so smaller icons get more air
-  // rather than a thinner dock. Icons sit centred above a strip for the dots.
+  // rather than a thinner dock. Icons sit centred above a strip for the dots (not under the
+  // holographic theme, below).
   readonly property int dotZone: 10
-  readonly property int dockHeight: Math.max(iconSize + dotZone + 4, Number(config.height) || 63)
-  readonly property int padding: Math.round((dockHeight - dotZone - iconSize) / 2) + 1
-  readonly property int sidePadding: Math.max(padding, Math.round(iconSize * 0.3))
-  readonly property int spacing: Math.round(iconSize * 0.26)
+  // Holographic, in tiles: 3 of air, the icon, 3 of air, so the icon sits centred. Its marks
+  // (a hairline with a square per window) are drawn in the lower air, not given a strip.
+  readonly property int dockHeight: holo ? iconSize + tile * 6 : Math.max(iconSize + dotZone + 4, Number(config.height) || 63)
+  readonly property int padding: holo ? tile * 3 : Math.round((dockHeight - dotZone - iconSize) / 2) + 1
+  readonly property int sidePadding: holo ? tile * 2 : Math.max(padding, Math.round(iconSize * 0.3))
+  // The holographic dock's ends, in tiles: its bracket a tile in from the edge, then two of
+  // air before the first icon. The same on the right.
+  readonly property int leadLeft: holo ? tile * 3 : sidePadding
+  readonly property int leadRight: holo ? tile * 3 : sidePadding
+  readonly property int spacing: holo ? tile * 2 : Math.round(iconSize * 0.26)
   // Flush with the screen edge.
   readonly property int edgeGap: 0
-  readonly property int separatorWidth: spacing + 1
+  readonly property int separatorWidth: holo ? tile * 2 : spacing + 1
   // Edge strip that reveals a hidden dock. Kept a few px tall: thinner input
   // regions get lost to rounding at fractional scale.
   readonly property int triggerHeight: 4
@@ -413,7 +434,7 @@ Item {
   // magnification without feedback from the growing icons.
   readonly property var baseCenters: {
     var out = []
-    var x = root.sidePadding
+    var x = root.leadLeft
     for (var i = 0; i < root.items.length; i++) {
       var w = root.items[i].separator ? root.separatorWidth : root.iconSize
       out.push(x + w / 2)
@@ -422,7 +443,7 @@ Item {
     return out
   }
   readonly property real baseWidth: {
-    var w = root.sidePadding * 2
+    var w = root.leadLeft + root.leadRight
     for (var i = 0; i < root.items.length; i++)
       w += (root.items[i].separator ? root.separatorWidth : root.iconSize) + (i ? root.spacing : 0)
     return w
@@ -581,7 +602,8 @@ Item {
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
         anchors.bottom: true
-        readonly property real dpr: modelData.devicePixelRatio || 1
+        // The window's, as a screen's is rounded up to a whole number under a fractional scale.
+        readonly property real dpr: devicePixelRatio || 1
         // Snap logical lengths onto the device-pixel grid (0.75 px steps at
         // 1.33) so resting icons land on whole pixels instead of smearing.
         function snap(v) { return Math.round(v * dpr) / dpr }
@@ -710,16 +732,25 @@ Item {
           Item {
             id: slider
             anchors.fill: parent
-            // Slide in: cubic-bezier(1, 0, 0.8, 1). Slide out: cubic-bezier(0.2, 0, 0, 1).
+            readonly property bool holo: holoFrame.item ? holoFrame.item.active : false
             readonly property real hiddenOffset: root.edgeGap + root.dockHeight + 6
             property real offset: panel.revealed ? 0 : hiddenOffset
+            // `offset` and the bindings on `panel.revealed` update in an order that isn't promised.
+            // Measured, the plain branch's animation starts on the previous direction's numbers,
+            // so its slide in really runs 420 ms on the slide-out curve, and its slide out 620 ms
+            // on the other. That is today's plain look, and it stays by these bindings staying
+            // as they are: routing them through another property swaps it. Under the holographic
+            // theme the Behavior's own target says which way, as it is set before the animation starts.
             Behavior on offset {
+              id: slide
               NumberAnimation {
-                duration: panel.revealed ? 620 : 420
+                // Shorter under the holographic theme: every frame of this redraws the dock
+                // and makes the compositor blur behind it again.
+                duration: Style.duration(slider.holo ? (slide.targetValue === 0 ? 180 : 280) : (panel.revealed ? 620 : 420))
                 easing.type: Easing.BezierSpline
-                easing.bezierCurve: panel.revealed
-                  ? [1, 0, 0.8, 1, 1, 1]
-                  : [0.2, 0, 0, 1, 1, 1]
+                easing.bezierCurve: slider.holo
+                  ? (slide.targetValue === 0 ? Style.easeOut : [0.2, 0, 0, 1, 1, 1])
+                  : (panel.revealed ? [1, 0, 0.8, 1, 1, 1] : [0.2, 0, 0, 1, 1, 1])
               }
             }
             transform: Translate { y: slider.offset }
@@ -731,16 +762,54 @@ Item {
               x: panel.snap((parent.width - width) / 2)
               y: panel.snap(parent.height - root.edgeGap - height)
               height: panel.snap(root.dockHeight)
-              width: Math.max(0, row.width - panel.snap(root.spacing)) + panel.snap(root.sidePadding) * 2
-              radius: Math.min(14, Style.cornerRadius)
-              color: Commons.Color.bar.background
-              border.width: 1
+              width: Math.max(0, row.width - panel.snap(root.spacing)) + panel.snap(root.leadLeft) + panel.snap(root.leadRight)
+              radius: root.holo ? 0 : Math.min(14, Style.cornerRadius)
+              color: slider.holo ? "transparent" : Commons.Color.bar.background
+              border.width: slider.holo ? 0 : 1
               border.color: Util.alpha(Commons.Color.bar.text, 0.12)
+            }
+
+            // The holographic theme's shared panel, as on the bar's panels (see quokecola.hud).
+            // The bottom runs off the screen.
+            Loader {
+              id: holoFrame
+              anchors.fill: dock
+              anchors.margins: holoFrame.item ? -holoFrame.item.pad : 0
+              source: Qt.resolvedUrl("../../quokecola.hud/holo/HoloFrame.qml")
+              // Loaded for `active`, which says the theme is on. The dock draws no panel under
+              // it: a bracket at each end and a keyline under each icon, below.
+              visible: !slider.holo
+            }
+
+            // The holographic dock's ends: a tall bracket each side, a tile in from the
+            // dock's edge, its feet a tile long and pointing inward. One device pixel.
+            Item {
+              id: ends
+              visible: slider.holo
+              readonly property color pale: Commons.Color.pick("holo.line", Commons.Color.bar.text)
+              readonly property real inset: panel.snap(root.tile)
+              readonly property real foot: panel.snap(root.tile)
+              readonly property real hair: 1 / panel.dpr
+              readonly property real tall: panel.snap(root.dockHeight) - inset * 2
+              Repeater {
+                model: 2
+                Item {
+                  required property int index
+                  readonly property bool atRight: index === 1
+                  x: atRight ? dock.x + dock.width - ends.inset - width : dock.x + ends.inset
+                  y: dock.y + ends.inset
+                  width: ends.foot
+                  height: ends.tall
+                  Rectangle { x: parent.atRight ? parent.width - width : 0; width: ends.hair; height: parent.height; color: ends.pale }
+                  Rectangle { width: parent.width; height: ends.hair; color: ends.pale }
+                  Rectangle { y: parent.height - height; width: parent.width; height: ends.hair; color: ends.pale }
+                }
+              }
             }
 
             Row {
               id: row
-              x: dock.x + panel.snap(root.sidePadding)
+              x: dock.x + panel.snap(root.leadLeft)
               y: dock.y + panel.snap(root.padding) + panel.restIcon - height
               // Each slot carries its own trailing gap so a growing or
               // shrinking icon opens and closes the space smoothly.
@@ -760,13 +829,13 @@ Item {
                   // 0 -> 1 as the icon arrives, back to 0 as it leaves.
                   property real grow: root.cellsReady ? 0 : 1
                   Component.onCompleted: grow = Qt.binding(function() { return slot.leaving ? 0 : 1 })
-                  Behavior on grow { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
+                  Behavior on grow { NumberAnimation { duration: Style.duration(300); easing.type: Easing.OutCubic } }
                   onGrowChanged: if (leaving && grow <= 0) Qt.callLater(root.dropCell, uid)
 
                   // Collapses while its icon is held off the dock to remove it.
                   property bool collapsed: false
                   property real room: collapsed || (cell.dragged && panel.removing) ? 0 : 1
-                  Behavior on room { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                  Behavior on room { NumberAnimation { duration: Style.duration(200); easing.type: Easing.OutCubic } }
 
                   width: (cell.width + panel.snap(root.spacing)) * grow * room
                   height: cell.height
@@ -777,13 +846,13 @@ Item {
                   // Slides over from where it was when a dragged icon passes it.
                   property real shift: 0
                   transform: Translate { x: slot.shift }
-                  NumberAnimation { id: shiftAnim; target: slot; property: "shift"; to: 0; duration: 220; easing.type: Easing.OutCubic }
+                  NumberAnimation { id: shiftAnim; target: slot; property: "shift"; to: 0; duration: Style.duration(220); easing.type: Easing.OutCubic }
                   function nudge(dx) { shiftAnim.stop(); slot.shift += dx; shiftAnim.from = slot.shift; shiftAnim.start() }
 
                   // Let go of: keep the icon where it was dropped, then glide home.
                   function hold() { cell.dropX = cell.liftX; cell.dropY = cell.liftY; cell.settleT = 1 }
                   function settle() { settleAnim.restart() }
-                  NumberAnimation { id: settleAnim; target: cell; property: "settleT"; from: 1; to: 0; duration: 260; easing.type: Easing.OutCubic }
+                  NumberAnimation { id: settleAnim; target: cell; property: "settleT"; from: 1; to: 0; duration: Style.duration(260); easing.type: Easing.OutCubic }
 
                   Item {
                     id: cell
@@ -807,13 +876,27 @@ Item {
                       return false
                     }
 
+                    // One letter per mark, at most three: f focused, r running, m minimized.
+                    // Sorted, not in focus order, and a string so that a focus change
+                    // elsewhere rebuilds nothing. A minimized window keeps a slot however
+                    // many others there are, since this is the one sign of it.
+                    readonly property string tickStates: {
+                      var f = "", r = "", m = ""
+                      for (var i = 0; i < wins.length; i++) {
+                        if (wins[i].address === root.activeAddress) f += "f"
+                        else if (wins[i].workspace.name === root.minimizedWorkspace) m += "m"
+                        else r += "r"
+                      }
+                      return (f + r.slice(0, Math.max(0, 3 - f.length - (m ? 1 : 0))) + m).slice(0, 3)
+                    }
+
                     readonly property real target: {
                       if (isSep || slot.leaving || !panel.hovered || root.magnify <= 1 || panel.menuKey !== "" || panel.dragUid >= 0) return 1
                       var d = (panel.pointerX - (root.baseCenters[index] || 0)) / (root.iconSize + root.spacing)
                       return 1 + (root.magnify - 1) * Math.exp(-d * d / 1.6)
                     }
                     property real zoom: target
-                    Behavior on zoom { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
+                    Behavior on zoom { NumberAnimation { duration: Style.duration(110); easing.type: Easing.OutCubic } }
 
                     width: isSep ? panel.snap(root.separatorWidth) : panel.snap(root.iconSize * zoom)
                     height: isSep ? panel.restIcon : panel.snap(root.iconSize * zoom)
@@ -823,9 +906,107 @@ Item {
                     Rectangle {
                       visible: cell.isSep
                       anchors.centerIn: parent
-                      width: 1
-                      height: root.iconSize * 0.7
-                      color: Util.alpha(Commons.Color.bar.text, 0.2)
+                      width: root.holo ? 1 / panel.dpr : 1
+                      // Under the holographic theme a column rule, the same height as the ends.
+                      height: root.holo ? panel.snap(root.dockHeight) - panel.snap(root.tile) * 2 : root.iconSize * 0.7
+                      color: root.holo ? Util.alpha(Commons.Color.pick("holo.line", Commons.Color.bar.text), Commons.Color.pickAlpha("holo.line-alpha", 0.4))
+                                       : Util.alpha(Commons.Color.bar.text, 0.2)
+                    }
+
+                    // Under the holographic theme each icon sits on a keyline, the construction
+                    // grid an icon is drawn on: its outer square, a line every tile, the two
+                    // diagonals and three circles, all one device pixel and faint, on a frosted square, so the icon,
+                    // a tile smaller than its cell all round, reads on top of it.
+                    Item {
+                      id: keyline
+                      visible: root.holo && !cell.isSep
+                      y: -cell.hop
+                      width: cell.width
+                      height: cell.height
+                      readonly property real hair: 1 / panel.dpr
+                      readonly property color pale: Commons.Color.pick("holo.line", Commons.Color.bar.text)
+                      readonly property real step: panel.snap(root.tile * cell.zoom)
+                      readonly property int lines: Math.max(0, Math.round(width / Math.max(1, step)) - 1)
+                      // A thin dark wash inside the square, just opaque enough (the layer rule's
+                      // ignore_alpha is 0.2) for the compositor to frost what is behind the icon.
+                      Rectangle {
+                        anchors.fill: parent
+                        color: Util.alpha(Commons.Color.pick("holo.ink", "#0B161D"), 0.3)
+                        border.width: keyline.hair
+                        border.color: Util.alpha(keyline.pale, 0.4)
+                      }
+                      Repeater {
+                        model: keyline.lines * 2
+                        Rectangle {
+                          required property int index
+                          readonly property bool across: index % 2 === 0
+                          readonly property real at: panel.snap((Math.floor(index / 2) + 1) * keyline.width / (keyline.lines + 1))
+                          x: across ? 0 : at
+                          y: across ? at : 0
+                          width: across ? keyline.width : keyline.hair
+                          height: across ? keyline.hair : keyline.height
+                          color: Util.alpha(keyline.pale, 0.1)
+                        }
+                      }
+                      Shape {
+                        anchors.fill: parent
+                        preferredRendererType: Shape.CurveRenderer
+                        readonly property real w: keyline.width
+                        readonly property real c: w / 2
+                        ShapePath {
+                          strokeWidth: keyline.hair
+                          strokeColor: Util.alpha(keyline.pale, 0.16)
+                          fillColor: "transparent"
+                          startX: 0; startY: 0
+                          PathLine { x: keyline.width; y: keyline.height }
+                          PathMove { x: keyline.width; y: 0 }
+                          PathLine { x: 0; y: keyline.height }
+                          PathAngleArc { centerX: keyline.width / 2; centerY: keyline.height / 2; radiusX: keyline.width * 0.42; radiusY: radiusX; startAngle: 0; sweepAngle: 360; moveToStart: true }
+                          PathAngleArc { centerX: keyline.width / 2; centerY: keyline.height / 2; radiusX: keyline.width * 0.26; radiusY: radiusX; startAngle: 0; sweepAngle: 360; moveToStart: true }
+                          PathAngleArc { centerX: keyline.width / 2; centerY: keyline.height / 2; radiusX: keyline.width * 0.1; radiusY: radiusX; startAngle: 0; sweepAngle: 360; moveToStart: true }
+                        }
+                      }
+                    }
+
+                    // Hover where magnification is off and nothing else would answer: the
+                    // cursor the panels' rows use, around the icon. No scale, so no relayout
+                    // and no re-raster. It stays on the icon a context menu belongs to.
+                    Rectangle {
+                      id: hoverCue
+                      readonly property string ink: Commons.Color.pick("controls.hover-cursor-color", Commons.Color.accent)
+                      readonly property bool wanted: root.holo && !cell.isSep && !slot.leaving && root.magnify <= 1
+                        && (panel.menuKey !== "" ? panel.menuKey === cell.key : mouse.containsMouse && panel.dragUid < 0)
+                      anchors.fill: icon
+                      anchors.margins: -panel.snap(root.tile / 2)    // on the state frame
+                      visible: opacity > 0
+                      opacity: wanted ? 1 : 0
+                      color: Util.alpha(ink, Commons.Color.pickAlpha("controls.hover-cursor-fill-alpha", 0.1))
+                      readonly property color edge: mouse.pressed ? ink : Util.alpha(ink, Commons.Color.pickAlpha("controls.hover-cursor-border-alpha", 0.6))
+                      // A bracket a tile long at each corner, one device pixel thick, which a
+                      // border can't be at a fractional scale.
+                      Repeater {
+                        model: 8
+                        Rectangle {
+                          required property int index
+                          readonly property bool across: index % 2 === 0
+                          readonly property bool atRight: (index >> 1) % 2 === 1
+                          readonly property bool low: index >= 4
+                          readonly property real len: panel.snap(root.tile)
+                          readonly property real hair: 1 / panel.dpr
+                          width: across ? len : hair
+                          height: across ? hair : len
+                          x: atRight ? hoverCue.width - width : 0
+                          y: low ? hoverCue.height - height : 0
+                          color: hoverCue.edge
+                        }
+                      }
+                      Behavior on opacity {
+                        NumberAnimation {
+                          duration: Style.duration(160)
+                          easing.type: Easing.BezierSpline
+                          easing.bezierCurve: Style.easeOut
+                        }
+                      }
                     }
 
                     // Two rasters, both loaded once: one at exactly the resting
@@ -839,16 +1020,19 @@ Item {
                       width: parent.width
                       height: parent.height
                       y: -cell.hop
-                      opacity: mouse.pressed && !cell.dragged ? 0.7 : 1
+                      opacity: (mouse.pressed && !cell.dragged) || (cell.launching && Style.reduceMotion && !root.holo) ? 0.7 : 1
                       readonly property string src: cell.isSep ? "" : root.iconFor(cell.key)
                       readonly property bool big: cell.zoom > 1.01
+                      // Under the holographic theme the icon keeps a tile clear of its keyline.
+                      readonly property real inset: root.holo ? panel.snap(root.tile * cell.zoom) : 0
 
                       Image {
                         anchors.fill: parent
+                        anchors.margins: icon.inset
                         visible: !icon.big || bigImg.status !== Image.Ready
                         source: icon.src
-                        sourceSize.width: Math.round(panel.restIcon * panel.dpr)
-                        sourceSize.height: Math.round(panel.restIcon * panel.dpr)
+                        sourceSize.width: Math.round((panel.restIcon - (root.holo ? panel.snap(root.tile) * 2 : 0)) * panel.dpr)
+                        sourceSize.height: Math.round((panel.restIcon - (root.holo ? panel.snap(root.tile) * 2 : 0)) * panel.dpr)
                         fillMode: Image.PreserveAspectFit
                         // Must stay async: a synchronous image://icon load
                         // crashes the whole shell inside QIcon::pixmap.
@@ -858,6 +1042,7 @@ Item {
                       Image {
                         id: bigImg
                         anchors.fill: parent
+                        anchors.margins: icon.inset
                         visible: icon.big && status === Image.Ready
                         source: root.magnify > 1 ? icon.src : ""
                         sourceSize.width: Math.ceil(root.iconSize * root.magnify * panel.dpr)
@@ -869,7 +1054,10 @@ Item {
                       }
                     }
 
-                    // Launch feedback: hop until a window shows up (or ~2.5s).
+                    // Launch feedback until a window shows up, or for the same 1.86 s either
+                    // way: the icon hops, or under the holographic theme its mark pulses. With
+                    // reduced motion nothing moves, and the mark or a dimmed icon holds instead.
+                    property bool launching: false
                     property real hop: 0
                     SequentialAnimation {
                       id: bounce
@@ -877,25 +1065,92 @@ Item {
                       NumberAnimation { target: cell; property: "hop"; to: root.iconSize * 0.3; duration: 280; easing.type: Easing.OutQuad }
                       NumberAnimation { target: cell; property: "hop"; to: 0; duration: 340; easing.type: Easing.OutBounce }
                     }
+                    SequentialAnimation {
+                      id: tickPulse
+                      loops: Animation.Infinite
+                      NumberAnimation { target: ticks; property: "opacity"; to: 0.35; duration: 310; easing.type: Easing.OutQuad }
+                      NumberAnimation { target: ticks; property: "opacity"; to: 1; duration: 310; easing.type: Easing.OutQuad }
+                    }
+                    Timer { id: launchEnd; interval: 1860; onTriggered: cell.endLaunch() }
+                    function startLaunch() {
+                      cell.launching = true
+                      launchEnd.restart()
+                      // Both animations stay out of reduced motion by this guard.
+                      if (Style.reduceMotion) return
+                      if (root.holo) tickPulse.restart()
+                      else bounce.restart()
+                    }
+                    function endLaunch() {
+                      cell.launching = false
+                      launchEnd.stop()
+                      bounce.stop()
+                      tickPulse.stop()
+                      cell.hop = 0
+                      ticks.opacity = 1
+                    }
                     Connections {
                       target: root
-                      function onLaunched(k) { if (k === cell.key && !cell.isSep) bounce.restart() }
+                      function onLaunched(k) { if (k === cell.key && !cell.isSep) cell.startLaunch() }
                     }
-                    onWinsChanged: if (wins.length && bounce.running) { bounce.stop(); hop = 0 }
+                    onWinsChanged: if (wins.length && cell.launching) cell.endLaunch()
 
+                    // A dot per window. Under the holographic theme instead the marks the desktop
+                    // puts on a window: a hairline the icon's width, one tile below it, and on it
+                    // a small square per window (at most three), centred on the line. The square
+                    // is the accent for the focused window, pale for a running one and dim for a
+                    // minimized one. Placed by hand to land on device pixels.
                     Row {
-                      visible: !cell.isSep
+                      id: dots
+                      readonly property real gap: Math.max(2, (root.dockHeight - root.padding - root.iconSize - 4) / 2 - 1)
+                      visible: !cell.isSep && !root.holo
                       anchors.horizontalCenter: parent.horizontalCenter
                       anchors.top: parent.bottom
-                      anchors.topMargin: Math.max(2, (root.dockHeight - root.padding - root.iconSize - 4) / 2 - 1)
+                      anchors.topMargin: gap
                       spacing: 3
                       Repeater {
-                        model: Math.min(3, cell.wins.length)
+                        model: root.holo ? 0 : Math.min(3, cell.wins.length)
                         Rectangle {
                           width: 4
                           height: 4
                           radius: 2
                           color: cell.isActive ? Commons.Color.accent : Util.alpha(Commons.Color.bar.text, 0.6)
+                        }
+                      }
+                    }
+                    // Under the holographic theme, a frame of four corner brackets round the
+                    // icon while the app has windows, and nothing while it has none. Its colour
+                    // is the app's state: the accent with the focused window, pale while any is
+                    // open, faint when every one is minimized. One device pixel, a tile long.
+                    Item {
+                      id: ticks
+                      readonly property string state: cell.tickStates.indexOf("f") >= 0 ? "f"
+                        : cell.tickStates.indexOf("r") >= 0 ? "r"
+                        : cell.tickStates.length > 0 ? "m" : (cell.launching ? "r" : "")
+                      readonly property real hair: 1 / panel.dpr
+                      readonly property real arm: panel.snap(root.tile)
+                      // Half a tile out from the icon, so neighbouring frames keep a tile between them.
+                      readonly property real out: panel.snap(root.tile / 2)
+                      readonly property color pale: Commons.Color.pick("holo.line", Commons.Color.bar.text)
+                      readonly property color ink: state === "f" ? Commons.Color.accent
+                        : state === "r" ? Util.alpha(pale, 0.7) : Util.alpha(pale, 0.3)
+                      visible: root.holo && !cell.isSep && state !== ""
+                      x: -out
+                      y: -out
+                      width: cell.width + out * 2
+                      height: cell.height + out * 2
+                      Repeater {
+                        model: 8
+                        Rectangle {
+                          required property int index
+                          readonly property bool across: index % 2 === 0
+                          readonly property bool atRight: (index >> 1) % 2 === 1
+                          readonly property bool low: index >= 4
+                          width: across ? ticks.arm : ticks.hair
+                          height: across ? ticks.hair : ticks.arm
+                          x: atRight ? ticks.width - width : 0
+                          y: low ? ticks.height - height : 0
+                          color: ticks.ink
+                          Behavior on color { ColorAnimation { duration: Style.duration(160) } }
                         }
                       }
                     }
@@ -906,20 +1161,42 @@ Item {
                       visible: removing || (!cell.isSep && mouse.containsMouse && panel.menuKey === "" && !mouse.pressed && panel.dragUid < 0)
                       anchors.horizontalCenter: parent.horizontalCenter
                       anchors.bottom: icon.top
-                      anchors.bottomMargin: 8
-                      width: tipText.implicitWidth + 16
-                      height: tipText.implicitHeight + 8
-                      radius: Math.min(6, Style.cornerRadius)
-                      color: Commons.Color.tooltip.background
-                      border.width: 1
-                      border.color: Util.alpha(Commons.Color.tooltip.border, 0.3)
+                      // Under the holographic theme, clear of the panel's top edge and its marks.
+                      anchors.bottomMargin: root.holo ? panel.snap(root.padding + root.tile) : 8
+                      width: root.holo ? Math.ceil((tipText.implicitWidth + root.tile * 2) / (root.tile * 2)) * root.tile * 2 : tipText.implicitWidth + 16
+                      height: root.holo ? root.tile * 4 : tipText.implicitHeight + 8
+                      radius: root.holo ? 0 : Math.min(6, Style.cornerRadius)
+                      color: root.holo ? Util.alpha(Commons.Color.pick("holo.ink", "#0B161D"), 0.85) : Commons.Color.tooltip.background
+                      border.width: root.holo ? 0 : 1
+                      // The theme's plate is pale, and its own border pale on it: use the ink,
+                      // or the plate has no edge over a light window.
+                      border.color: root.holo ? Util.alpha(Commons.Color.tooltip.text, 0.6) : Util.alpha(Commons.Color.tooltip.border, 0.3)
                       Text {
                         id: tipText
                         anchors.centerIn: parent
                         text: tip.removing ? "Remove from Dock" : cell.isSep ? "" : root.nameFor(cell.key)
                         textFormat: Text.PlainText
-                        color: Commons.Color.tooltip.text
-                        font.pixelSize: Style.font.body
+                        color: root.holo ? Commons.Color.pick("holo.line", Commons.Color.tooltip.text) : Commons.Color.tooltip.text
+                        font.family: root.holo ? Style.font.family : Qt.application.font.family
+                        font.pixelSize: root.holo ? Math.max(9, Style.font.body) : Style.font.body
+                      }
+                      // Under the holographic theme, a bracket at each corner, a tile long. After
+                      // the text, which stays this item's first child.
+                      Repeater {
+                        model: root.holo ? 8 : 0
+                        Rectangle {
+                          required property int index
+                          readonly property bool across: index % 2 === 0
+                          readonly property bool atRight: (index >> 1) % 2 === 1
+                          readonly property bool low: index >= 4
+                          readonly property real len: panel.snap(root.tile)
+                          readonly property real hair: 1 / panel.dpr
+                          width: across ? len : hair
+                          height: across ? hair : len
+                          x: atRight ? tip.width - width : 0
+                          y: low ? tip.height - height : 0
+                          color: Commons.Color.pick("holo.line", Commons.Color.tooltip.text)
+                        }
                       }
                     }
 
@@ -928,6 +1205,8 @@ Item {
                       enabled: !cell.isSep && !slot.leaving
                       anchors.fill: parent
                       anchors.margins: -root.spacing / 2
+                      // Down to the screen edge, where a thrown pointer lands. Every theme.
+                      anchors.bottomMargin: row.y + row.height - panel.height
                       hoverEnabled: true
                       acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
                       preventStealing: true
@@ -1026,11 +1305,11 @@ Item {
           ParallelAnimation {
             id: popin
             NumberAnimation {
-              target: card; property: "shown"; from: 0; to: 1; duration: 270
+              target: card; property: "shown"; from: 0; to: 1; duration: Style.duration(270)
               easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1]
             }
             NumberAnimation {
-              target: card; property: "opacity"; from: 0; to: 1; duration: 115
+              target: card; property: "opacity"; from: 0; to: 1; duration: Style.duration(115)
               easing.type: Easing.BezierSpline; easing.bezierCurve: [0.5, 0.5, 0.75, 1, 1, 1]
             }
           }
@@ -1044,9 +1323,39 @@ Item {
             width: Math.round(Math.max(232, Math.min(340, col.implicitWidth + 2 * padding)))
             height: Math.round(col.implicitHeight + 2 * padding)
             padding: Math.round(Style.space(6))
-            radius: Math.min(12, Style.cornerRadius)
+            radius: root.holo ? 0 : Math.min(12, Style.cornerRadius)
             color: Commons.Color.menu.background
             borderSpec: Border.surfaceSpec("menu", "border", Commons.Color.menu.border, 1)
+
+            // Under the holographic theme, the dock's own frame: a hairline all round and a
+            // bracket a tile long at each corner, as on the icon it belongs to.
+            Item {
+              id: cardFrame
+              visible: root.holo
+              anchors.fill: parent
+              z: 1
+              readonly property real hair: 1 / (card.QsWindow.window ? card.QsWindow.window.devicePixelRatio : 1)
+              readonly property color pale: Commons.Color.pick("holo.line", Commons.Color.menu.text)
+              readonly property color rule: Util.alpha(pale, Commons.Color.pickAlpha("holo.line-alpha", 0.44))
+              Rectangle { width: parent.width; height: cardFrame.hair; color: cardFrame.rule }
+              Rectangle { y: parent.height - height; width: parent.width; height: cardFrame.hair; color: cardFrame.rule }
+              Rectangle { width: cardFrame.hair; height: parent.height; color: cardFrame.rule }
+              Rectangle { x: parent.width - width; width: cardFrame.hair; height: parent.height; color: cardFrame.rule }
+              Repeater {
+                model: 8
+                Rectangle {
+                  required property int index
+                  readonly property bool across: index % 2 === 0
+                  readonly property bool atRight: (index >> 1) % 2 === 1
+                  readonly property bool low: index >= 4
+                  width: across ? root.tile * 2 : cardFrame.hair * 2
+                  height: across ? cardFrame.hair * 2 : root.tile * 2
+                  x: atRight ? cardFrame.width - width : 0
+                  y: low ? cardFrame.height - height : 0
+                  color: cardFrame.pale
+                }
+              }
+            }
 
             Column {
               id: col
@@ -1089,7 +1398,7 @@ Item {
                       text: menu.wins.length === 0 ? "Not running"
                           : menu.wins.length === 1 ? "1 window" : menu.wins.length + " windows"
                       textFormat: Text.PlainText
-                      color: Util.alpha(Commons.Color.menu.text, 0.5)
+                      color: Commons.Color.pick("holo.text-dim", Util.alpha(Commons.Color.menu.text, 0.5))
                       font.family: Style.font.menuFamily
                       font.pixelSize: Style.font.bodySmall
                     }
@@ -1164,9 +1473,9 @@ Item {
     width: parent ? parent.width : 200
     implicitWidth: 36 + mlabel.implicitWidth + (badge ? mbadge.width + 16 : 12)
     height: visible ? 32 : 0
-    radius: Math.min(8, Style.cornerRadius)
+    radius: root.holo ? 0 : Math.min(8, Style.cornerRadius)
     color: hot ? (danger ? Util.alpha(Commons.Color.urgent, 0.14) : Commons.Color.menu.selectedBackground) : "transparent"
-    Behavior on color { ColorAnimation { duration: 90 } }
+    Behavior on color { ColorAnimation { duration: Style.duration(90) } }
 
     Item {
       id: lead
@@ -1185,7 +1494,7 @@ Item {
       Rectangle {
         anchors.centerIn: parent
         visible: mrow.glyph === ""
-        width: 6; height: 6; radius: 3
+        width: 6; height: 6; radius: root.holo ? 0 : 3
         color: mrow.current ? Commons.Color.accent : Util.alpha(Commons.Color.menu.text, 0.25)
       }
     }
@@ -1210,7 +1519,7 @@ Item {
       anchors.rightMargin: 8
       width: Math.max(20, btext.implicitWidth + 10)
       height: 18
-      radius: Math.min(5, Style.cornerRadius)
+      radius: root.holo ? 0 : Math.min(5, Style.cornerRadius)
       color: Util.alpha(Commons.Color.menu.text, mrow.hot ? 0.14 : 0.08)
       Text {
         id: btext

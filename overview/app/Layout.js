@@ -183,6 +183,8 @@ function groupBy(windows, keyOf) {
     .sort((a, b) => a.key - b.key);
 }
 
+const LABEL_SPACE = 30;
+
 /**
  * Lay several groups out as columns, one per group.
  *
@@ -199,8 +201,6 @@ function groupBy(windows, keyOf) {
  * @returns [{key, x, width, slots}] — x is relative to the area's left, and
  *          each group's slots are relative to its own column.
  */
-const LABEL_SPACE = 30;
-
 function columns(groups, area, options) {
   const opts = Object.assign({ columnGap: 34, labelSpace: LABEL_SPACE }, options || {});
   if (groups.length === 0) return [];

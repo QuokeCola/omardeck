@@ -1,0 +1,434 @@
+[
+  {
+    "id": 0,
+    "name": "eDP-1",
+    "description": "LG Display 0x07C8",
+    "make": "LG Display",
+    "model": "0x07C8",
+    "serial": "",
+    "width": 1920,
+    "height": 1200,
+    "physicalWidth": 300,
+    "physicalHeight": 190,
+    "refreshRate": 120.043,
+    "x": 1029,
+    "y": 1440,
+    "activeWorkspace": {
+      "id": 1,
+      "name": "1"
+    },
+    "specialWorkspace": {
+      "id": 0,
+      "name": ""
+    },
+    "reserved": [
+      0,
+      22,
+      0,
+      0
+    ],
+    "scale": 1.3333334,
+    "transform": 0,
+    "focused": false,
+    "dpmsStatus": true,
+    "vrr": false,
+    "solitary": "0",
+    "solitaryBlockedBy": [
+      "WINDOWED",
+      "CANDIDATE"
+    ],
+    "activelyTearing": false,
+    "tearingBlockedBy": [
+      "NOT_TORN",
+      "USER",
+      "CANDIDATE",
+      "HW_CURSOR"
+    ],
+    "directScanoutTo": "0",
+    "directScanoutBlockedBy": [
+      "USER",
+      "CANDIDATE"
+    ],
+    "disabled": false,
+    "currentFormat": "XRGB8888",
+    "mirrorOf": "none",
+    "availableModes": [
+      "1920x1200@120.04Hz"
+    ],
+    "colorManagementPreset": "srgb",
+    "sdrBrightness": 1,
+    "sdrSaturation": 1,
+    "sdrMinLuminance": 0.2,
+    "sdrMaxLuminance": 80,
+    "hardwareCursorsInUse": true
+  },
+  {
+    "id": 1,
+    "name": "DP-1",
+    "description": "LG Electronics LG ULTRAWIDE SERIAL-1",
+    "make": "LG Electronics",
+    "model": "LG ULTRAWIDE",
+    "serial": "SERIAL-1",
+    "width": 3440,
+    "height": 1440,
+    "physicalWidth": 800,
+    "physicalHeight": 340,
+    "refreshRate": 59.973,
+    "x": 0,
+    "y": 0,
+    "activeWorkspace": {
+      "id": 21,
+      "name": "21"
+    },
+    "specialWorkspace": {
+      "id": 0,
+      "name": ""
+    },
+    "reserved": [
+      0,
+      22,
+      0,
+      0
+    ],
+    "scale": 1,
+    "transform": 0,
+    "focused": false,
+    "dpmsStatus": true,
+    "vrr": false,
+    "solitary": "0",
+    "solitaryBlockedBy": [
+      "WINDOWED",
+      "CANDIDATE"
+    ],
+    "activelyTearing": false,
+    "tearingBlockedBy": [
+      "NOT_TORN",
+      "USER",
+      "CANDIDATE",
+      "HW_CURSOR"
+    ],
+    "directScanoutTo": "0",
+    "directScanoutBlockedBy": [
+      "USER",
+      "CANDIDATE"
+    ],
+    "disabled": false,
+    "currentFormat": "XRGB8888",
+    "mirrorOf": "none",
+    "availableModes": [
+      "3440x1440@59.97Hz",
+      "3440x1440@49.99Hz",
+      "3440x1440@29.99Hz",
+      "2560x1080@60.00Hz",
+      "2560x1080@59.94Hz",
+      "2560x1080@60.00Hz",
+      "2560x1080@50.00Hz",
+      "1920x1080@60.00Hz",
+      "1920x1080@60.00Hz",
+      "1920x1080@59.94Hz",
+      "1920x1080@50.00Hz",
+      "1680x1050@59.88Hz",
+      "1600x900@60.00Hz",
+      "1280x1024@60.02Hz",
+      "1280x800@59.91Hz",
+      "1152x864@59.97Hz",
+      "1280x720@60.00Hz",
+      "1280x720@60.00Hz",
+      "1280x720@59.94Hz",
+      "1280x720@50.00Hz",
+      "1024x768@60.00Hz",
+      "800x600@60.32Hz",
+      "720x576@50.00Hz",
+      "720x480@60.00Hz",
+      "720x480@60.00Hz",
+      "720x480@59.94Hz",
+      "720x480@59.94Hz",
+      "640x480@60.00Hz",
+      "640x480@59.94Hz",
+      "640x480@59.94Hz"
+    ],
+    "colorManagementPreset": "srgb",
+    "sdrBrightness": 1,
+    "sdrSaturation": 1,
+    "sdrMinLuminance": 0.2,
+    "sdrMaxLuminance": 80,
+    "hardwareCursorsInUse": true
+  },
+  {
+    "id": 2,
+    "name": "DP-2",
+    "description": "Dell Inc. DELL P2423 SERIAL-2",
+    "make": "Dell Inc.",
+    "model": "DELL P2423",
+    "serial": "SERIAL-2",
+    "width": 1920,
+    "height": 1200,
+    "physicalWidth": 520,
+    "physicalHeight": 320,
+    "refreshRate": 59.95,
+    "x": -1536,
+    "y": 218,
+    "activeWorkspace": {
+      "id": 11,
+      "name": "11"
+    },
+    "specialWorkspace": {
+      "id": 0,
+      "name": ""
+    },
+    "reserved": [
+      0,
+      22,
+      0,
+      0
+    ],
+    "scale": 1.25,
+    "transform": 0,
+    "focused": true,
+    "dpmsStatus": true,
+    "vrr": false,
+    "solitary": "0",
+    "solitaryBlockedBy": [
+      "WINDOWED",
+      "CANDIDATE"
+    ],
+    "activelyTearing": false,
+    "tearingBlockedBy": [
+      "NOT_TORN",
+      "USER",
+      "CANDIDATE",
+      "HW_CURSOR"
+    ],
+    "directScanoutTo": "0",
+    "directScanoutBlockedBy": [
+      "USER",
+      "CANDIDATE"
+    ],
+    "disabled": false,
+    "currentFormat": "XRGB8888",
+    "mirrorOf": "none",
+    "availableModes": [
+      "1920x1200@59.95Hz",
+      "1920x1080@60.00Hz",
+      "1920x1080@60.00Hz",
+      "1920x1080@59.94Hz",
+      "1920x1080@50.00Hz",
+      "1600x1200@60.00Hz",
+      "1280x1024@75.03Hz",
+      "1280x1024@60.02Hz",
+      "1152x864@75.00Hz",
+      "1280x720@75.02Hz",
+      "1280x720@60.00Hz",
+      "1280x720@60.00Hz",
+      "1280x720@59.94Hz",
+      "1280x720@50.00Hz",
+      "1024x768@75.03Hz",
+      "1024x768@60.00Hz",
+      "800x600@75.00Hz",
+      "800x600@60.32Hz",
+      "720x576@50.00Hz",
+      "720x480@60.00Hz",
+      "720x480@60.00Hz",
+      "720x480@59.94Hz",
+      "720x480@59.94Hz",
+      "720x480@59.94Hz",
+      "640x480@75.00Hz",
+      "640x480@60.00Hz",
+      "640x480@59.94Hz",
+      "640x480@59.94Hz",
+      "720x400@70.08Hz"
+    ],
+    "colorManagementPreset": "srgb",
+    "sdrBrightness": 1,
+    "sdrSaturation": 1,
+    "sdrMinLuminance": 0.2,
+    "sdrMaxLuminance": 80,
+    "hardwareCursorsInUse": true
+  }
+]
+
+
+[
+  {
+    "address": "0x55ac81e4d960",
+    "mapped": true,
+    "hidden": false,
+    "visible": true,
+    "acceptsInput": true,
+    "at": [
+      26,
+      48
+    ],
+    "size": [
+      3388,
+      1366
+    ],
+    "workspace": {
+      "id": 22,
+      "name": "22"
+    },
+    "floating": false,
+    "monitor": 1,
+    "class": "google-chrome",
+    "title": "window-1",
+    "initialClass": "google-chrome",
+    "initialTitle": "window-1",
+    "pid": 861314,
+    "xwayland": false,
+    "pinned": false,
+    "pinFullscreened": false,
+    "fullscreen": 0,
+    "fullscreenClient": 0,
+    "fullscreenHandler": "default",
+    "allowedOverFullscreen": true,
+    "grouped": [],
+    "tags": [
+      "chromium-based-browser*"
+    ],
+    "swallowing": "0x0",
+    "focusHistoryID": 3,
+    "inhibitingIdle": false,
+    "xdgTag": "",
+    "xdgDescription": "",
+    "contentType": "none",
+    "tearingHint": false,
+    "stableId": "180000c2"
+  },
+  {
+    "address": "0x55ac8238dd20",
+    "mapped": true,
+    "hidden": false,
+    "visible": true,
+    "acceptsInput": true,
+    "at": [
+      1055,
+      1488
+    ],
+    "size": [
+      1388,
+      826
+    ],
+    "workspace": {
+      "id": 1,
+      "name": "1"
+    },
+    "floating": false,
+    "monitor": 0,
+    "class": "foot",
+    "title": "window-2",
+    "initialClass": "foot",
+    "initialTitle": "window-2",
+    "pid": 2445799,
+    "xwayland": false,
+    "pinned": false,
+    "pinFullscreened": false,
+    "fullscreen": 0,
+    "fullscreenClient": 0,
+    "fullscreenHandler": "default",
+    "allowedOverFullscreen": true,
+    "grouped": [],
+    "tags": [
+      "omarchy-mode-opened*",
+      "terminal*",
+      "transparent-window*"
+    ],
+    "swallowing": "0x0",
+    "focusHistoryID": 2,
+    "inhibitingIdle": false,
+    "xdgTag": "",
+    "xdgDescription": "",
+    "contentType": "none",
+    "tearingHint": false,
+    "stableId": "180002b9"
+  },
+  {
+    "address": "0x55ac822d8a10",
+    "mapped": true,
+    "hidden": false,
+    "visible": true,
+    "acceptsInput": true,
+    "at": [
+      26,
+      48
+    ],
+    "size": [
+      3388,
+      1366
+    ],
+    "workspace": {
+      "id": 21,
+      "name": "21"
+    },
+    "floating": false,
+    "monitor": 1,
+    "class": "google-chrome",
+    "title": "window-3",
+    "initialClass": "google-chrome",
+    "initialTitle": "window-3",
+    "pid": 861314,
+    "xwayland": false,
+    "pinned": false,
+    "pinFullscreened": false,
+    "fullscreen": 0,
+    "fullscreenClient": 0,
+    "fullscreenHandler": "default",
+    "allowedOverFullscreen": true,
+    "grouped": [],
+    "tags": [
+      "chromium-based-browser*"
+    ],
+    "swallowing": "0x0",
+    "focusHistoryID": 1,
+    "inhibitingIdle": false,
+    "xdgTag": "",
+    "xdgDescription": "",
+    "contentType": "none",
+    "tearingHint": false,
+    "stableId": "180002b6"
+  },
+  {
+    "address": "0x55ac823fd640",
+    "mapped": true,
+    "hidden": false,
+    "visible": true,
+    "acceptsInput": true,
+    "at": [
+      -1510,
+      266
+    ],
+    "size": [
+      1484,
+      886
+    ],
+    "workspace": {
+      "id": 11,
+      "name": "11"
+    },
+    "floating": false,
+    "monitor": 2,
+    "class": "google-chrome",
+    "title": "window-4",
+    "initialClass": "google-chrome",
+    "initialTitle": "window-4",
+    "pid": 861314,
+    "xwayland": false,
+    "pinned": false,
+    "pinFullscreened": false,
+    "fullscreen": 0,
+    "fullscreenClient": 0,
+    "fullscreenHandler": "default",
+    "allowedOverFullscreen": true,
+    "grouped": [],
+    "tags": [
+      "chromium-based-browser*"
+    ],
+    "swallowing": "0x0",
+    "focusHistoryID": 0,
+    "inhibitingIdle": false,
+    "xdgTag": "",
+    "xdgDescription": "",
+    "contentType": "none",
+    "tearingHint": false,
+    "stableId": "180002c3"
+  }
+]

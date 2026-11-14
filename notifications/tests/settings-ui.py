@@ -1,4 +1,4 @@
-"""Exercise the real panel and settings helper against disposable configuration."""
+"""Exercise the real panel against disposable configuration."""
 import json
 import os
 from pathlib import Path
@@ -19,7 +19,7 @@ for name in ["Commons", "Ui"]:
 home = base / "home"
 config = home / ".config/omarchy/shell.json"
 config.parent.mkdir(parents=True)
-original = {"version": 1, "other": "preserved", "bar": {"layout": {"right": [{"id": "quokecola.omardeck", "language": "nb", "browserGrouping": "hostname"}]}}, "plugins": [{"id": "foamy.notifications", "browserGrouping": "hostname", "useBrowserFavicons": True}]}
+original = {"version": 1, "other": "preserved", "bar": {"layout": {"right": [{"id": "quokecola.omardeck", "browserGrouping": "hostname"}]}}}
 config.write_text(json.dumps(original))
 cli = base / "bin"
 cli.mkdir()
@@ -41,7 +41,7 @@ import QtTest
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
-import qs.Commons
+import qs.Commons as Commons
 import "plugin" as Plugin
 ShellRoot {
   id: root
@@ -49,16 +49,12 @@ ShellRoot {
   property bool failSave: false
   property bool finished: false
   property bool dnd: false
-  QtObject {
-    id: registry
-    property var installedPlugins: ({"foamy.notifications":{id:"foamy.notifications"}})
-  }
   Component.onCompleted: {
-    Color.background = "#24273a"; Color.foreground = "#cad3f5"; Color.accent = "#8aadf4"
+    Commons.Color.background = "#24273a"; Commons.Color.foreground = "#cad3f5"; Commons.Color.accent = "#8aadf4"
   }
   IpcHandler {
     target: "notifications"
-    function dndState(): string { return root.dnd ? "on" : "off" }
+    function isDnd(): string { return root.dnd ? "on" : "off" }
     function toggleDnd(): string { root.dnd = !root.dnd; return root.dnd ? "on" : "off" }
   }
   FileView {
@@ -68,7 +64,7 @@ ShellRoot {
     onFileChanged: reload()
     onLoaded: root.config = JSON.parse(text())
   }
-  // Model the host's widget endpoint; service edits use the real Python helper.
+  // Model the host's widget endpoint.
   IpcHandler {
     target: "shell"
     function setBarWidget(id: string, key: string, valueJson: string, selectorJson: string): string {
@@ -91,17 +87,16 @@ ShellRoot {
     anchors { top: true; left: true; right: true }
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.namespace: "foamy-settings-test-bar"
-    color: Color.background
+    color: Commons.Color.background
     Item {
       id: bar
       width: parent.width
       height: 32
       property string position: "top"
-      property var pluginRegistry: registry
       property int barSize: 32
       property string fontFamily: "sans-serif"
-      property color barForeground: Color.foreground
-      property color urgent: Color.urgent
+      property color barForeground: Commons.Color.foreground
+      property color urgent: Commons.Color.urgent
       property bool vertical: false
       property bool hideLabels: false
       property bool foregroundAnimationEnabled: false
@@ -149,38 +144,24 @@ ShellRoot {
         tryCompare(menu, "visible", true)
         control("notificationSettings").triggered()
         tryCompare(panel, "editingSettings", true)
-        tryCompare(panel, "popupSettingsLoading", false)
-        verify(panel.popupSettingsAvailable, panel.settingsError)
         var pane = control("notificationSettingsPane")
         wait(250)
         verify(pane.height > 500, "The full settings view must fit on this fixture screen")
         waitForRendering(pane)
         var card = pane.parent.parent.parent.parent
         capture(card, "settings-wide-dark")
-        var compact = control("popups-compact")
+        var compact = control("center-compact")
         compact.clicked()
-        tryVerify(function() { return panel.preferenceActive === null })
-        compare(panel.popupSettings.compact, false)
-        tryVerify(function() { return root.config.plugins[0].compact === false })
-        compare(root.config.bar.layout.right[0].compact, undefined)
-        var removeWithX = control("popups-closeButtonRemovesHistory")
-        compare(removeWithX.checked, false)
-        removeWithX.forceActiveFocus(); keyClick(Qt.Key_Space)
-        tryVerify(function() { return panel.preferenceActive === null && panel.popupSettings.closeButtonRemovesHistory === true })
-        compare(root.config.plugins[0].closeButtonRemovesHistory, true)
-        compare(root.config.bar.layout.right[0].closeButtonRemovesHistory, undefined)
-        panel.savePreference("center", "compact", true)
-        tryVerify(function() { return root.config.bar.layout.right[0].compact === true })
-        tryVerify(function() { return panel.preferenceActive === null })
-        compare(panel.compact, true)
-        compare(root.config.plugins[0].compact, false)
-        panel.savePreference("popups", "normalTimeoutSec", 15)
-        tryVerify(function() { return panel.popupSettings.normalTimeoutSec === 15 })
+        tryVerify(function() { return panel.preferenceActive === null && root.config.bar.layout.right[0].compact === true })
+        tryCompare(panel, "compact", true)
+        panel.savePreference("keepDays", 15)
+        tryVerify(function() { return root.config.bar.layout.right[0].keepDays === 15 })
+        tryCompare(control("center-keepDays"), "value", 15)
         compare(root.config.other, "preserved")
         panel.settings = Object.assign({}, panel.settings, {panelWidth:320})
         wait(200); compare(pane.width, 318)
         capture(card, "settings-narrow-dark")
-        Color.background = "#eff1f5"; Color.foreground = "#4c4f69"; Color.accent = "#1e66f5"
+        Commons.Color.background = "#eff1f5"; Commons.Color.foreground = "#4c4f69"; Commons.Color.accent = "#1e66f5"
         wait(200); capture(card, "settings-narrow-light")
         panel.settings = Qt.binding(function() { return root.config.bar.layout.right[0] })
         var back = control("settingsBack")
@@ -192,19 +173,18 @@ ShellRoot {
       function test_02_invalid_and_failed_saves() {
         try {
         panel.openSettings()
-        tryCompare(panel, "popupSettingsLoading", false)
-        panel.savePreference("popups", "normalTimeoutSec", 0)
+        panel.savePreference("keepDays", 0)
         verify(panel.settingsError !== "")
         compare(panel.preferenceActive, null)
         root.failSave = true
-        panel.savePreference("center", "compact", false)
+        panel.savePreference("compact", false)
         tryVerify(function() { return panel.preferenceActive === null })
         verify(panel.settingsError !== "")
         compare(panel.compact, true)
         var grouping = control("center-browserGrouping")
         grouping.open(); tryCompare(grouping, "popupOpen", true); keyClick(Qt.Key_Down); keyClick(Qt.Key_Return)
         tryCompare(grouping, "popupOpen", false)
-        tryVerify(function() { return panel.settingsError !== "" && panel.preferenceActive === null && !panel.popupSettingsLoading })
+        tryVerify(function() { return panel.settingsError !== "" && panel.preferenceActive === null })
         compare(grouping.value, "hostname")
         capture(control("notificationSettingsPane").parent.parent.parent.parent, "settings-save-error")
         root.failSave = false
@@ -215,98 +195,43 @@ ShellRoot {
         grouping.open(); tryCompare(grouping, "popupOpen", true); keyClick(Qt.Key_Up); keyClick(Qt.Key_Return)
         tryCompare(grouping, "popupOpen", false)
         tryCompare(panel, "browserGrouping", "hostname")
-        panel.savePreference("center", "compact", false)
+        panel.savePreference("compact", false)
         tryVerify(function() { return panel.preferenceActive === null })
         compare(panel.settingsError, "")
         tryCompare(panel, "compact", false)
-        var duration = control("popups-normalTimeoutSec")
-        tryVerify(function() { return !panel.popupSettingsLoading && duration.enabled })
-        duration.forceActiveFocus(); keyClick(Qt.Key_A, Qt.ControlModifier)
+        var days = control("center-keepDays")
+        tryVerify(function() { return days.enabled })
+        days.field.forceActiveFocus(); keyClick(Qt.Key_A, Qt.ControlModifier)
         keyClick(Qt.Key_1); keyClick(Qt.Key_2); keyClick(Qt.Key_Return)
-        tryVerify(function() { return panel.popupSettings.normalTimeoutSec === 12 })
-        tryVerify(function() { return !panel.popupSettingsLoading && duration.enabled })
-        duration.forceActiveFocus(); keyClick(Qt.Key_A, Qt.ControlModifier); keyClick(Qt.Key_9)
-        keyClick(Qt.Key_Escape)
-        compare(duration.text, "12")
-        panel.savePreference("popups", "normalTimeoutSec", 15)
-        tryVerify(function() { return duration.text === "15" })
+        tryVerify(function() { return root.config.bar.layout.right[0].keepDays === 12 })
         } catch (error) { console.log("SETTINGS_FAILURE errors", error.message, error.stack); throw error }
       }
-      function test_03_disabled_service_and_scroll_focus() {
+      function test_03_scroll_focus() {
         try {
-        var next = JSON.parse(configFile.text())
-        next.disabledPlugins = ["foamy.notifications"]
-        configFile.setText(JSON.stringify(next))
-        wait(150)
         panel.openSettings()
-        tryCompare(panel, "popupSettingsLoading", false)
-        verify(!panel.popupSettingsAvailable)
         var pane = control("notificationSettingsPane"), scroll = control("settingsScroll")
-        compare(findChild(pane, "popups-compact"), null)
-        compare(control("popups-availability").text, "Utvidelsen er ikke aktivert")
         wait(200)
-        capture(pane.parent.parent.parent.parent, "settings-disabled")
         pane.height = 320
-        control("center-maxItems").forceActiveFocus()
+        control("center-maxItems").field.forceActiveFocus()
         tryVerify(function() { return scroll.contentY > 0 })
         verify(control("center-maxItems").enabled)
-        wait(200)
-        capture(pane.parent.parent.parent.parent, "settings-disabled-scroll")
-        } catch (error) { console.log("SETTINGS_FAILURE disabled/scroll", error.message, error.stack); throw error }
+        } catch (error) { console.log("SETTINGS_FAILURE scroll", error.message, error.stack); throw error }
       }
-      function test_04_uninstalled_service() {
-        var next = JSON.parse(configFile.text())
-        delete next.disabledPlugins
-        configFile.setText(JSON.stringify(next))
-        registry.installedPlugins = ({})
-        panel.openSettings()
-        tryCompare(panel, "popupSettingsLoading", false)
-        verify(panel.popupSettingsAvailable, "A stale configuration entry is retained in this fixture")
-        verify(!panel.popupPluginInstalled)
-        var pane = control("notificationSettingsPane")
-        pane.height = pane.implicitHeight
-        compare(findChild(pane, "popups-compact"), null)
-        compare(control("popups-availability").text, "Utvidelsen er ikke installert")
-        verify(control("center-maxItems").enabled)
-        wait(200); capture(pane.parent.parent.parent.parent, "settings-uninstalled")
-        delete next.plugins
-        configFile.setText(JSON.stringify(next))
-        panel.openSettings()
-        tryCompare(panel, "popupSettingsLoading", false)
-        verify(!panel.popupSettingsAvailable)
-        compare(panel.settingsError, "")
-        compare(control("popups-availability").text, "Utvidelsen er ikke installert")
-      }
-      function test_06_clipboard_parent_keys_and_feedback() {
+      function test_06_search_keys() {
         panel.startSearch()
         var search = control("notificationSearch")
-        tryCompare(search, "inputActiveFocus", true)
+        tryCompare(search, "activeFocus", true)
         keyClick(Qt.Key_A)
         compare(panel.filter, "a")
         keyClick(Qt.Key_Down)
-        tryCompare(search, "inputActiveFocus", false)
-        search.focusInput()
+        tryCompare(search, "activeFocus", false)
+        search.forceActiveFocus()
         keyClick(Qt.Key_Return)
-        tryCompare(search, "inputActiveFocus", false)
-        search.focusInput()
-        search.pasteError = "Clipboard text is too large or contains invalid characters."
-        wait(100)
-        capture(search.parent.parent.parent, "search-paste-error")
+        tryCompare(search, "activeFocus", false)
+        search.forceActiveFocus()
         keyClick(Qt.Key_Escape)
         compare(panel.searching, false)
-        compare(search.pasteError, "")
         compare(panel.filter, "")
-        panel.openSettings()
-        tryCompare(panel, "popupSettingsLoading", false)
-        var field = control("center-maxItems")
-        field.pasteError = "Could not paste clipboard text. Copy plain text and try again."
-        compare(panel.settingsError, field.pasteError)
-        field.focusInput()
-        keyClick(Qt.Key_A, Qt.ControlModifier)
-        keyClick(Qt.Key_7)
-        compare(panel.settingsError, "")
-        keyClick(Qt.Key_Escape)
-        compare(field.text, String(panel.settings.maxItems || 1000))
       }
       function test_07_archived_screenshot_action_and_retry() {
         try {
@@ -345,4 +270,4 @@ except subprocess.TimeoutExpired:
     output = process.communicate(timeout=3)[0]
 print(output)
 print("Settings captures:", app)
-assert process.returncode == 0 and "SETTINGS_UI 7 passed 0 failed" in output
+assert process.returncode == 0 and "SETTINGS_UI 5 passed 0 failed" in output

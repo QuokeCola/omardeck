@@ -156,8 +156,13 @@ rectangles with no QML or compositor in it, so it is tested in node rather than
 by looking at it:
 
 ```bash
-node tests/layout-test.js
+tests/run.sh
 ```
+
+That runs those, the Lua half against a pretend `hl`, and the real overview
+replayed through gestures. Anything that instantiates the plugin runs in a
+`bwrap` sandbox (`tests/sandbox.sh`) that proves it cannot reach the live session
+before it starts, with a pretend Hyprland and a private X server inside.
 
 ## What it touches
 

@@ -182,8 +182,8 @@ end
 -- Three fingers sideways slide from one workspace to the next under your
 -- fingers, overview open or not; the shell draws it either way (see
 -- `deskSwipe` in shell/Service.qml for why not Hyprland's own swipe). The
--- shell says what to register through this: "slide" for ours, "workspace"
--- for Hyprland's, anything else for none.
+-- shell says what to register through this: "slide" for ours, anything else
+-- for none.
 --
 -- Hyprland raises both of the errors that matter here past pcall: removing a
 -- gesture that is not there, and adding one a previous gesture shadows. So
@@ -196,13 +196,8 @@ function __aerial_horizontal(mode)
     hl.gesture({ fingers = 3, direction = "horizontal", action = "unset" })
     _G.__aerial_h = nil
   end
-  if mode == "slide" then
-    hl.gesture({ fingers = 3, direction = "horizontal", action = both(side()) })
-  elseif mode == "workspace" then
-    hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })
-  else
-    return
-  end
+  if mode ~= "slide" then return end
+  hl.gesture({ fingers = 3, direction = "horizontal", action = both(side()) })
   _G.__aerial_h = mode
 end
 
@@ -259,3 +254,23 @@ hl.gesture({ fingers = 3, direction = "down", action = both(vertical("down")) })
 hl.gesture({ fingers = 4, direction = "up",   action = both(vertical("allup")) })
 hl.gesture({ fingers = 4, direction = "down", action = both(vertical("alldown")) })
 _G.__aerial_registered = true
+
+-- The shortcuts section of bindings.lua, again. Something loaded after that file
+-- can take the same keys: hyprmoncfg's generated monitors file binds SUPER + TAB,
+-- and its daemon keeps that file last in hyprland.lua. This runs after every config
+-- reload, so the shortcuts saved in the settings panel are the ones that hold. It
+-- comes last and can't raise, so a bad section never costs the gestures above.
+local reapplied, reason = pcall(function()
+  local config = os.getenv("XDG_CONFIG_HOME")
+  if not config or config == "" then config = (os.getenv("HOME") or "") .. "/.config" end
+  local file = io.open(config .. "/hypr/bindings.lua", "r")
+  if not file then return end
+  local text = file:read("*a")
+  file:close()
+  local section = text:match("%-%- >>> aerial[^\n]*\n(.-)%-%- <<< aerial")
+  local run = section and load(section, "=aerial shortcuts")
+  if not run then return end
+  for combo in section:gmatch('o%.bind%("([^"]+)"') do hl.unbind(combo) end
+  run()
+end)
+if not reapplied then print("omardeck: shortcuts section failed: " .. tostring(reason)) end

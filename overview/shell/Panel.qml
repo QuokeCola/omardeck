@@ -6,13 +6,15 @@ import qs.Commons as Commons
 import qs.Ui
 import "../app/Shortcuts.js" as Shortcuts
 import "../../notifications" as Notifications
+import "../../look" as Looks
 
 // Aerial's settings, from a button on the bar.
 //
 // Four switches that take effect at once — frosted glass, liquid glass,
-// swiping between desktops, and every screen switching desktop together — and Aerial's keyboard shortcuts, which are Hyprland bindings and
-// so live in the user's Omarchy bindings file, in a section of their own (see
-// app/Shortcuts.js). Shortcuts are edited here and only written on Save.
+// swiping between desktops, and every screen switching desktop together — and
+// Aerial's keyboard shortcuts, which are Hyprland bindings and so live in the
+// user's Omarchy bindings file, in a section of their own (see app/Shortcuts.js).
+// Shortcuts are edited here and only written on Save.
 Panel {
   id: root
   moduleName: "quokecola.omardeck"
@@ -23,6 +25,9 @@ Panel {
 
   readonly property var service: root.bar && root.bar.shell && typeof root.bar.shell.serviceFor === "function"
                                  ? root.bar.shell.serviceFor(root.moduleName)?.overview ?? null : null
+
+  // No overlay out here on the bar, so its own copy of the look.
+  Looks.ActiveLook { id: look }
 
   // ------------------------------------------------------------- switches
 
@@ -58,18 +63,6 @@ Panel {
   onSyncScreensChanged: root.pushSettings()
   onLiquidGlassChanged: root.pushSettings()
 
-  Timer {
-    // The service can load after the bar; look again until it is there.
-    interval: 800
-    repeat: true
-    running: !root.service
-    onTriggered: {
-      const found = root.bar && root.bar.shell && typeof root.bar.shell.serviceFor === "function"
-                    ? root.bar.shell.serviceFor(root.moduleName)?.overview ?? null : null
-      if (found) root.pushSettings()
-    }
-  }
-
   // ------------------------------------------------------------ shortcuts
 
   readonly property string bindingsPath: {
@@ -94,8 +87,16 @@ Panel {
     watchChanges: true
     printErrors: false
     onFileChanged: bindingsFile.reload()
-    onLoaded: root.readBindings()
+    onLoaded: {
+      root.bindingsKnown = true
+      root.readBindings()
+    }
+    onLoadFailed: (error) => root.bindingsKnown = error === FileViewError.FileNotFound
   }
+
+  // Whether the file's contents are known: it was read, or it is not there. Until
+  // then text() is empty, and a save from that would replace the whole file.
+  property bool bindingsKnown: false
 
   function readBindings() {
     let text = ""
@@ -165,15 +166,20 @@ Panel {
 
   function save() {
     if (root.blocked) return
-    let text = ""
-    try { text = bindingsFile.text() || "" } catch (e) { text = "" }
-    // A combination something else already has is taken over, the way
-    // Omarchy's own file says to: unbind, then bind.
-    const takeOver = ({})
-    for (const act of Shortcuts.ACTIONS) {
-      if (root.clashesFor(act.id).some(c => !c.ours)) takeOver[act.id] = true
+    let text = null
+    if (root.bindingsKnown) {
+      try { text = bindingsFile.text() || "" } catch (e) { text = null }
     }
-    bindingsFile.setText(Shortcuts.write(text, root.draft, takeOver))
+    if (text === null) {
+      root.status = "Not saved: the bindings file could not be read. Nothing was changed."
+      return
+    }
+    const written = Shortcuts.write(text, root.draft)
+    if (written === null) {
+      root.status = Shortcuts.problem(text)
+      return
+    }
+    bindingsFile.setText(written)
     root.saved = Object.assign({}, root.draft)
     root.status = "Saved — Hyprland picks it up by itself."
     // Hyprland reloads the file on its own; ask for the bindings again once
@@ -199,6 +205,7 @@ Panel {
       bindingsFile.reload()
     } else {
       root.stopRecording()
+      root.cursor = ""
     }
   }
 
@@ -207,6 +214,45 @@ Panel {
   Connections {
     target: root.service
     function onRecordingChanged() { if (!root.service.recording && root.recordingId !== "") root.stopRecording() }
+  }
+
+  // --------------------------------------------------------------- keyboard
+
+  // The control the arrow keys have reached, or "" until one is pressed. Tab stays the
+  // bar's, for the next panel, so this is a cursor rather than focus: the same one the
+  // stock panels have.
+  property string cursor: ""
+  // Top to bottom. Only what can be used: Save and Discard leave as they turn off.
+  readonly property var cursorOrder: {
+    const order = root.frost ? ["frost", "liquidGlass", "deskSwipe", "syncScreens"]
+                             : ["frost", "deskSwipe", "syncScreens"]
+    for (const act of Shortcuts.ACTIONS) order.push("shortcut:" + act.id)
+    if (root.dirty) order.push("discard")
+    if (root.dirty && !root.blocked && root.recordingId === "") order.push("save")
+    return order
+  }
+  onCursorOrderChanged: {
+    if (root.cursor !== "" && root.cursorOrder.indexOf(root.cursor) < 0)
+      root.cursor = root.cursorOrder[root.cursorOrder.length - 1]
+  }
+
+  function moveCursor(step) {
+    const order = root.cursorOrder
+    const at = order.indexOf(root.cursor)
+    if (at < 0) root.cursor = order[step > 0 ? 0 : order.length - 1]
+    else root.cursor = order[Math.max(0, Math.min(order.length - 1, at + step))]
+  }
+
+  function cursorShortcut() {
+    return root.cursor.indexOf("shortcut:") === 0 ? root.cursor.slice("shortcut:".length) : ""
+  }
+
+  function activateCursor() {
+    const shortcut = root.cursorShortcut()
+    if (shortcut !== "") root.startRecording(shortcut)
+    else if (root.cursor === "discard") root.discard()
+    else if (root.cursor === "save") root.save()
+    else if (root.cursor !== "") root.setSetting(root.cursor, !root[root.cursor])
   }
 
   // ----------------------------------------------------------------- button
@@ -238,7 +284,7 @@ Panel {
     open: root.opened
     slideIn: true
     slideFrom: "top"
-    surfaceColor: Qt.alpha(Commons.Color.popups.background, root.frost ? 0.72 : 1)
+    surfaceColor: Qt.alpha(Commons.Color.popups.background, root.frost ? look.panelAlpha(0.72) : 1)
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(400))
     contentHeight: panel.fittedContentHeight(column.implicitHeight)
@@ -250,6 +296,9 @@ Panel {
       blocked: root.recordingId !== ""
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
+      onMoveRequested: function(dx, dy) { root.moveCursor(dx + dy) }
+      onActivateRequested: root.activateCursor()
+      onDeleteRequested: if (root.cursorShortcut() !== "") root.setDraft(root.cursorShortcut(), "")
 
       // Listens for the combination being recorded.
       Item {
@@ -316,13 +365,15 @@ Panel {
             Text {
               textFormat: Text.PlainText
               text: "Window overview and desktop swipes"
-              color: root.bar.foreground
-              opacity: 0.6
+              color: look.dim(root.bar.foreground)
+              opacity: look.quiet(0.6)
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.bodySmall
             }
           }
         }
+
+        Item { width: 1; height: look.sectionGap; visible: look.sectionGap > 0 }
 
         PanelSeparator { width: parent.width; foreground: root.bar.foreground }
 
@@ -331,6 +382,8 @@ Panel {
           text: "BEHAVIOUR"
           foreground: root.bar.foreground
           fontFamily: root.bar.fontFamily
+          fontSize: look.primaryText(Style.font.caption)
+          font.letterSpacing: look.headerTracking
         }
 
         Toggle {
@@ -338,8 +391,10 @@ Panel {
           label: "Frosted glass"
           description: "Blur behind see-through windows, the way Hyprland does, and behind this panel and the notification sheet. Uses more GPU."
           checked: root.frost
+          hasCursor: root.cursor === "frost"
           foreground: root.bar.foreground
           fontFamily: root.bar.fontFamily
+          onHovered: function(isHovered) { if (isHovered) root.cursor = "" }
           onClicked: root.setSetting("frost", !root.frost)
         }
 
@@ -356,8 +411,10 @@ Panel {
                      : glassState === "error" ? root.service.glassError
                      : "Whatever Hyprland blurs bends like glass at its edges: see-through windows, the bar, the dock, these panels and the overview's cards. Turns Hyprland's blur down while on."
           checked: root.liquidGlass
+          hasCursor: root.cursor === "liquidGlass"
           foreground: root.bar.foreground
           fontFamily: root.bar.fontFamily
+          onHovered: function(isHovered) { if (isHovered) root.cursor = "" }
           onClicked: root.setSetting("liquidGlass", !root.liquidGlassChosen)
         }
 
@@ -366,8 +423,10 @@ Panel {
           label: "Swipe between desktops"
           description: "Three fingers sideways on the desktop slide to the next one."
           checked: root.deskSwipe
+          hasCursor: root.cursor === "deskSwipe"
           foreground: root.bar.foreground
           fontFamily: root.bar.fontFamily
+          onHovered: function(isHovered) { if (isHovered) root.cursor = "" }
           onClicked: root.setSetting("deskSwipe", !root.deskSwipe)
         }
 
@@ -376,10 +435,14 @@ Panel {
           label: "All screens together"
           description: "Every screen switches desktop at once. Workspaces come in blocks of ten a screen: 1-10 on the laptop, then 11-20, 21-30 on the others from left to right."
           checked: root.syncScreens
+          hasCursor: root.cursor === "syncScreens"
           foreground: root.bar.foreground
           fontFamily: root.bar.fontFamily
+          onHovered: function(isHovered) { if (isHovered) root.cursor = "" }
           onClicked: root.setSetting("syncScreens", !root.syncScreens)
         }
+
+        Item { width: 1; height: look.sectionGap; visible: look.sectionGap > 0 }
 
         PanelSeparator { width: parent.width; foreground: root.bar.foreground }
 
@@ -388,6 +451,8 @@ Panel {
           text: "SHORTCUTS"
           foreground: root.bar.foreground
           fontFamily: root.bar.fontFamily
+          fontSize: look.primaryText(Style.font.caption)
+          font.letterSpacing: look.headerTracking
         }
 
         Repeater {
@@ -399,6 +464,7 @@ Panel {
             readonly property string combo: root.draft[row.modelData.id] || ""
             readonly property bool listening: root.recordingId === row.modelData.id
             readonly property var clashes: root.clashesFor(row.modelData.id)
+            readonly property bool hasCursor: root.cursor === "shortcut:" + row.modelData.id
             width: parent.width
             spacing: Style.space(4)
 
@@ -407,8 +473,8 @@ Panel {
               height: Style.spacing.popupRowHeight + Style.space(6)
               radius: Style.cornerRadius
               color: row.listening ? Style.selectedFill
-                   : (rowMouse.containsMouse ? Style.hoverFill : "transparent")
-              border.width: row.listening ? 1 : 0
+                   : (rowMouse.containsMouse || row.hasCursor ? Style.hoverFill : "transparent")
+              border.width: row.listening || row.hasCursor ? 1 : 0
               border.color: Commons.Color.accent
 
               Text {
@@ -430,8 +496,9 @@ Panel {
                 text: row.listening ? "Press keys…  (Esc to cancel)"
                       : (row.combo !== "" ? row.combo : "Not set")
                 color: row.listening ? Commons.Color.accent
-                       : (row.clashes.some(c => c.ours) ? root.bar.urgent : root.bar.foreground)
-                opacity: row.combo === "" && !row.listening ? 0.5 : 1
+                       : (row.clashes.some(c => c.ours) ? look.alertText(root.bar.urgent)
+                          : (row.combo === "" ? look.dim(root.bar.foreground) : root.bar.foreground))
+                opacity: row.combo === "" && !row.listening ? look.quiet(0.5) : 1
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.body
                 font.bold: row.combo !== "" && !row.listening
@@ -443,6 +510,7 @@ Panel {
                 anchors.rightMargin: clear.width + Style.space(8)
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
+                onContainsMouseChanged: if (rowMouse.containsMouse) root.cursor = ""
                 onClicked: row.listening ? root.stopRecording() : root.startRecording(row.modelData.id)
               }
 
@@ -475,8 +543,8 @@ Panel {
                 text: modelData.ours
                       ? "Same as " + modelData.description + " — pick another."
                       : "Also " + modelData.description + " — saving takes it over."
-                color: modelData.ours ? root.bar.urgent : Qt.darker(root.bar.foreground, 1.15)
-                opacity: modelData.ours ? 1 : 0.75
+                color: modelData.ours ? look.alertText(root.bar.urgent) : look.dim(Qt.darker(root.bar.foreground, 1.15))
+                opacity: modelData.ours ? 1 : look.quiet(0.75)
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.bodySmall
               }
@@ -490,8 +558,8 @@ Panel {
           visible: root.status !== ""
           wrapMode: Text.WordWrap
           text: root.status
-          color: root.bar.foreground
-          opacity: 0.7
+          color: look.dim(root.bar.foreground)
+          opacity: look.quiet(0.7)
           font.family: root.bar.fontFamily
           font.pixelSize: Style.font.bodySmall
         }
@@ -501,10 +569,10 @@ Panel {
           width: parent.width
           wrapMode: Text.WordWrap
           text: "Saved to the Aerial section of " + root.bindingsPath.replace(String(Quickshell.env("HOME") || ""), "~")
-          color: root.bar.foreground
-          opacity: 0.45
+          color: look.dim(root.bar.foreground)
+          opacity: look.quiet(0.45)
           font.family: root.bar.fontFamily
-          font.pixelSize: Style.font.caption
+          font.pixelSize: look.legible(Style.font.caption)
         }
 
         // ---------- save / discard
@@ -516,8 +584,11 @@ Panel {
             text: "Discard"
             enabled: root.dirty
             opacity: enabled ? 1 : 0.4
+            hasCursor: root.cursor === "discard"
+            bordered: hasCursor
             foreground: root.bar.foreground
             fontFamily: root.bar.fontFamily
+            onHovered: function(isHovered) { if (isHovered) root.cursor = "" }
             onClicked: root.discard()
           }
 
@@ -528,7 +599,10 @@ Panel {
             foreground: root.bar.foreground
             accent: Commons.Color.accent
             selected: enabled
+            hasCursor: root.cursor === "save"
+            bordered: hasCursor
             fontFamily: root.bar.fontFamily
+            onHovered: function(isHovered) { if (isHovered) root.cursor = "" }
             onClicked: root.save()
           }
         }
