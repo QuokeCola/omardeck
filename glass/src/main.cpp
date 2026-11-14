@@ -247,13 +247,17 @@ static std::string surfaceLabel(const STexData& data) {
     return "window";
 }
 
-// A layer that covers its monitor (menus, panels with scrims) draws a card
-// somewhere inside it; its rect edges are the screen edges, not the card's.
+// A layer that covers its monitor (menus, panels with scrims), or spans it
+// along one side (a bar, a sheet down the screen edge such as the
+// notification center), draws a card somewhere inside it; its rect edges are
+// the screen edges or see-through margin, not the card's. Boxed as a window,
+// the lens lands on those edges, where it is offscreen or cut away by
+// ignore_alpha, and what is left is flat blur.
 static bool coversMonitor(const STexData& data, const CBox& box) {
     if (!data.currentLS.lock())
         return false;
     const auto px = g_pHyprRenderer->m_renderData.pMonitor->m_pixelSize;
-    return box.width >= px.x * 0.9 && box.height >= px.y * 0.9;
+    return box.width >= px.x * 0.9 || box.height >= px.y * 0.9;
 }
 
 static void hkRenderTextureWithBlurInternal(CHyprOpenGLImpl* thisptr, SP<ITexture> tex, const CBox& box, const STexData& data) {

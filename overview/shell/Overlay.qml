@@ -278,6 +278,8 @@ Scope {
   readonly property alias slide: slideController.slide
   readonly property alias shownSlide: slideController.shownSlide
   readonly property alias moving: slideController.moving
+  // Fingers down on a slide.
+  readonly property alias sliding: slideController.sliding
   readonly property alias canSlide: slideController.canSlide
   readonly property alias deskSliding: slideController.deskSliding
   function laneOf(workspaceId) { return slideController.laneOf(workspaceId) }
