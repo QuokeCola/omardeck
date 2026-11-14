@@ -28,29 +28,15 @@ Item {
     deskDots.position = Math.max(0, Math.min(deskDots.liveLanes.length - 1, deskDots.livePosition))
   readonly property int count: deskDots.lanes.length
 
-  // The mark is a stretch from `tail` to `position`, its head. The head is
-  // the slide itself: under the fingers, then on the landing spring. While
-  // the fingers are down the tail stays on the dot the swipe began on, so
-  // the mark reaches out toward the next dot; once they lift the tail is
-  // pulled after the head, and the mark gathers into the dot it landed on.
-  // A slide from the keyboard has no fingers, so the tail simply trails.
-  property real tail: 0
-  readonly property bool held: overlay.sliding === true
-  property bool snapTail: false
-  Behavior on tail {
-    enabled: !deskDots.snapTail
-    SmoothedAnimation { velocity: -1; duration: Commons.Style.duration(280); reversingMode: SmoothedAnimation.Sync }
-  }
-  onPositionChanged: if (!deskDots.held) deskDots.tail = deskDots.position
-  onHeldChanged: if (!deskDots.held) deskDots.tail = deskDots.position
-  // Shown afresh: one dot, where the desktop is, nothing trailing in.
-  onVisibleChanged: if (deskDots.visible) {
-    deskDots.snapTail = true
-    deskDots.tail = deskDots.position
-    deskDots.snapTail = false
-  }
-  readonly property real markFrom: Math.min(deskDots.tail, deskDots.position)
-  readonly property real markTo: Math.max(deskDots.tail, deskDots.position)
+  // The mark's span, read straight off how far the slide is between two
+  // dots, so it moves with the fingers and the landing spring alike and
+  // never on a clock of its own. Over the first half of the way the
+  // leading edge reaches across to the next dot; over the second half the
+  // trailing edge catches up. Backwards, the same in reverse.
+  readonly property int markBase: Math.floor(deskDots.position)
+  readonly property real markPart: deskDots.position - deskDots.markBase
+  readonly property real markFrom: deskDots.markBase + Math.max(0, 2 * deskDots.markPart - 1)
+  readonly property real markTo: deskDots.markBase + Math.min(1, 2 * deskDots.markPart)
   // Fades in rising a little, and out sinking back.
   property real shown: deskDots.wanted || dotsLinger.running ? 1 : 0
   Behavior on shown { NumberAnimation { duration: Commons.Style.duration(deskDots.wanted ? 220 : 260); easing.type: Easing.OutCubic } }
@@ -149,7 +135,7 @@ Item {
   }
 
   // The mark: a block of the accent under the dots, one dot wide at rest,
-  // stretched over every dot between its tail and its head while it moves.
+  // stretched across to the next one as the slide moves.
   readonly property real markPad: 3
   Rectangle {
     x: 8 + deskDots.markFrom * deskDots.step + (deskDots.step - deskDots.dot) / 2 - deskDots.markPad
