@@ -148,6 +148,25 @@ Item {
     border.color: Qt.rgba(1, 1, 1, 0.14)
   }
 
+  // The mark: a block of the accent under the dots, one dot wide at rest,
+  // stretched over every dot between its tail and its head while it moves.
+  readonly property real markPad: 3
+  Rectangle {
+    x: 8 + deskDots.markFrom * deskDots.step + (deskDots.step - deskDots.dot) / 2 - deskDots.markPad
+    anchors.verticalCenter: parent.verticalCenter
+    width: (deskDots.markTo - deskDots.markFrom) * deskDots.step + deskDots.dot + 2 * deskDots.markPad
+    height: deskDots.dot + 2 * deskDots.markPad
+    radius: surface.rounded(height / 2)
+    color: Commons.Color.accent
+  }
+
+  // Dots on the block take the colour that reads against the accent: dark on
+  // a light accent, light on a dark one.
+  readonly property color accent: Commons.Color.accent
+  readonly property bool accentLight: 0.2126 * deskDots.accent.r + 0.7152 * deskDots.accent.g
+                                      + 0.0722 * deskDots.accent.b > 0.55
+  readonly property color onMark: deskDots.accentLight ? Qt.rgba(0.04, 0.04, 0.05, 1) : Qt.rgba(1, 1, 1, 1)
+
   Repeater {
     model: deskDots.lanes
     delegate: Rectangle {
@@ -155,27 +174,26 @@ Item {
       required property var modelData
       required property int index
       readonly property bool filled: surface.monitorWindows.some(w => overlay.wsOf(w) === laneDot.modelData)
+      // How much of the dot the block covers, 0 to 1, so it changes colour as
+      // the block's edge passes over it rather than all at once.
+      readonly property real outside: Math.max(0, deskDots.markFrom - laneDot.index,
+                                               laneDot.index - deskDots.markTo) * deskDots.step
+      readonly property real covered: Math.max(0, Math.min(1,
+        (deskDots.dot + deskDots.markPad - laneDot.outside) / deskDots.dot))
+      function tint(off, on) {
+        const c = laneDot.covered
+        return Qt.rgba(off.r + (on.r - off.r) * c, off.g + (on.g - off.g) * c,
+                       off.b + (on.b - off.b) * c, off.a + (on.a - off.a) * c)
+      }
       x: 8 + laneDot.index * deskDots.step + (deskDots.step - width) / 2
       anchors.verticalCenter: parent.verticalCenter
       width: deskDots.dot
       height: deskDots.dot
       radius: surface.rounded(width / 2)
-      color: laneDot.filled ? Qt.rgba(1, 1, 1, 0.55) : "transparent"
+      color: laneDot.filled ? laneDot.tint(Qt.rgba(1, 1, 1, 0.55), Qt.alpha(deskDots.onMark, 0.85))
+                            : "transparent"
       border.width: laneDot.filled ? 0 : 1
-      border.color: Qt.rgba(1, 1, 1, 0.45)
+      border.color: laneDot.tint(Qt.rgba(1, 1, 1, 0.45), Qt.alpha(deskDots.onMark, 0.75))
     }
-  }
-
-  // The mark: one ring at rest, stretched over every dot between its tail
-  // and its head while it moves.
-  Rectangle {
-    x: 8 + deskDots.markFrom * deskDots.step + (deskDots.step - deskDots.dot - 6) / 2
-    anchors.verticalCenter: parent.verticalCenter
-    width: (deskDots.markTo - deskDots.markFrom) * deskDots.step + deskDots.dot + 6
-    height: deskDots.dot + 6
-    radius: surface.rounded(width / 2)
-    color: "transparent"
-    border.width: 2
-    border.color: Commons.Color.accent
   }
 }
