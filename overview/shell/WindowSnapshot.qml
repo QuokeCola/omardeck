@@ -133,6 +133,7 @@ Scope {
         // Omarchy turns the global shadow on for floating workspaces and opts
         // every other window out, so the option alone doesn't say who has one.
         shadow: alpha ? alpha.shadow : false,
+        under: root.under[top.address] === true,
         bar: barred ? deco.barHeight : 0,
       })
       if (entry !== before[top.address]) changed = true
@@ -267,7 +268,37 @@ Scope {
   // stacking order; the order `hyprctl clients` lists them in is — it is the
   // order they are drawn in. Asked for each time the overview opens, in the
   // same call as `alphas`.
+  //
+  // On a workspace with a maximized or fullscreen window it is not that order
+  // alone. Hyprland draws that window over every other one there, and then, over
+  // it, the floating ones focused since (`allowedOverFullscreen`), so those three
+  // are kept apart here: under it, it, over it.
   property var zOrder: ({})
+
+  // The windows Hyprland is not drawing at all, by address: on a workspace with a
+  // maximized or fullscreen window, and not let over it. Each still has a card,
+  // since the overview is where to find it, but one that comes in as the cards
+  // spread: standing whole where its window is, it appeared out of nothing, over
+  // the maximized window, on the overview's first frame.
+  property var under: ({})
+
+  // Which windows are let over a maximized one changes with focus alone, and the
+  // answer asked for as the overview opens comes a frame or two late. So while
+  // something is maximized, a change of focus asks again.
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      const name = event.name || ""
+      if (name === "fullscreen") stacking.restart()
+      else if (name === "activewindowv2"
+               && (Hyprland.workspaces.values || []).some(space => space.hasFullscreen)) stacking.restart()
+    }
+  }
+  Timer {
+    id: stacking
+    interval: 60
+    onTriggered: root.askAlphas()
+  }
 
   // How see-through Hyprland draws each window, by address: { active,
   // inactive }. A capture is the window's own pixels, solid; the opacity is
@@ -287,10 +318,23 @@ Scope {
         const answers = text.split("\n\n\n").map(s => { try { return JSON.parse(s) } catch (e) { return null } })
         // First, `hyprctl clients`: the order they are drawn in.
         if (Array.isArray(answers[0])) {
+          const clients = answers[0]
+          const count = clients.length
+          const covered = ({})
+          clients.forEach(c => { if ((c.fullscreen || 0) > 0 && c.workspace) covered[c.workspace.id] = true })
           const order = ({})
-          answers[0].forEach((c, i) => { order[String(c.address).replace(/^0x/, "")] = i })
+          const under = ({})
+          clients.forEach((c, i) => {
+            const key = String(c.address).replace(/^0x/, "")
+            const full = (c.fullscreen || 0) > 0
+            const beneath = !!(c.workspace && covered[c.workspace.id]) && !full
+                            && c.allowedOverFullscreen === false && c.pinned !== true
+            order[key] = i + (beneath ? -count : (full || !(c.workspace && covered[c.workspace.id]) ? 0 : count))
+            if (beneath) under[key] = true
+          })
           // Only when it changed; see `geo`.
           if (root.kept(root.zOrder, order) !== root.zOrder) root.zOrder = order
+          if (root.kept(root.under, under) !== root.under) root.under = under
         }
         const deco = k => answers[k] && typeof answers[k].float === "number" ? answers[k].float : 1
         const decoActive = deco(1)

@@ -61,10 +61,15 @@ Item {
   // card is ready to stand in for its window.
   Item {
     id: workArea
-    x: surface.reserved[0]
+    // Down to the bottom and out to the sides, reserved or not: a strip kept
+    // for the dock has nothing in it but the wallpaper and the shadows of the
+    // windows beside it, and left to fade, a maximized window's shadow stayed
+    // there on the desktop after its card had moved off. Only the bar's strip
+    // is left out.
+    x: 0
     y: surface.reserved[1]
-    width: surface.width - surface.reserved[0] - surface.reserved[2]
-    height: surface.height - surface.reserved[1] - surface.reserved[3]
+    width: surface.width
+    height: surface.height - surface.reserved[1]
     clip: true
     opacity: overlay.opened && surface.captured && solid.status === Image.Ready ? 1 : overlay.veil
 

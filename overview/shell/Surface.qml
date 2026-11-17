@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Wayland
 
 // One screen's worth of overview.
@@ -26,8 +27,18 @@ PanelWindow {
   // one, stops the compositor scanning that window straight out, which is
   // what a fullscreen video wants. There the overview maps when asked.
   visible: overlay.opened || !surface.fullscreenHere
-  readonly property bool fullscreenHere: !!(surface.monitor && surface.monitor.activeWorkspace
-                                            && surface.monitor.activeWorkspace.hasFullscreen)
+  // Really fullscreen, that is. Hyprland says `hasFullscreen` of a workspace with a
+  // maximized window too, and that one is laid out like any other: under the bar,
+  // above the dock's strip. Taken for fullscreen, the overview mapped only as it
+  // opened, the dock remapped to stay on top of it (see `restack` in the dock),
+  // and for that moment the dock's strip was nobody's: the maximized window grew
+  // down into it and back, under cards placed from wherever it was by then.
+  readonly property bool fullscreenHere: {
+    const space = surface.monitor ? surface.monitor.activeWorkspace : null
+    if (!space || !space.hasFullscreen) return false
+    return (Hyprland.toplevels.values || []).some(top =>
+      top.workspace === space && ((top.lastIpcObject || {}).fullscreen || 0) >= 2)
+  }
   color: "transparent"
   WlrLayershell.namespace: "omarchy-aerial"
   // Under the bar, which stays where it is on the desktop: above the windows, and
