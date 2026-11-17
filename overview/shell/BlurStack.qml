@@ -121,14 +121,19 @@ Item {
 
         ShaderEffectSource {
           readonly property real margin: 24
+          // Its titlebar stands above the card, outside its bounds, and is taller
+          // than the margin: left at that, the top of the bar was cut off this
+          // picture, so the bar of a window behind a see-through one changed shape
+          // the moment the overview took over from the desktop.
+          readonly property real above: margin + (level.cardItem ? level.cardItem.barH : 0)
           visible: level.cardItem !== null
           sourceItem: level.cardItem
           x: level.cardItem ? level.cardItem.x - margin : 0
-          y: level.cardItem ? level.cardItem.y - margin : 0
+          y: level.cardItem ? level.cardItem.y - above : 0
           width: level.cardItem ? level.cardItem.width + 2 * margin : 0
-          height: level.cardItem ? level.cardItem.height + 2 * margin : 0
-          sourceRect: level.cardItem ? Qt.rect(-margin, -margin, level.cardItem.width + 2 * margin,
-                                               level.cardItem.height + 2 * margin) : Qt.rect(0, 0, 0, 0)
+          height: level.cardItem ? level.cardItem.height + above + margin : 0
+          sourceRect: level.cardItem ? Qt.rect(-margin, -above, level.cardItem.width + 2 * margin,
+                                               level.cardItem.height + above + margin) : Qt.rect(0, 0, 0, 0)
           opacity: level.cardItem ? level.cardItem.opacity : 0
           live: true
         }

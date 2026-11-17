@@ -35,8 +35,13 @@ Item {
     transformOrigin: Item.TopLeft
     scale: bar.card.width / face.width
     color: bar.deco.barColor
-    topLeftRadius: bar.overlay.deco.rounding
-    topRightRadius: bar.overlay.deco.rounding
+    // The card's own corner, whatever size the card is drawn at (the face is laid
+    // out at the window's size and scaled), and a little tighter than it: the bar
+    // then runs just under the border's rounded corner. Cut to the very same arc,
+    // the two antialias apart, and a dark seam of the shadow shows between them.
+    readonly property real corner: Math.max(0, bar.card.radius - 1.5) / Math.max(0.01, face.scale)
+    topLeftRadius: face.corner
+    topRightRadius: face.corner
 
     Text {
       textFormat: Text.PlainText

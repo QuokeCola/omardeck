@@ -66,7 +66,10 @@ Item {
   // put away, when the desktop shows exactly what the last frame did.
   readonly property bool frosted: surface.glass === true
   readonly property bool frostLive: deskDots.frosted && deskDots.wanted && surface.visible
-  readonly property real radius: surface.rounded(height / 2)
+  // Fully round wherever Hyprland rounds at all, however small its radius: a
+  // pill with 6px corners reads as a box. Square setups (rounding 0) stay square.
+  function pill(r) { return overlay.deco.rounding > 0 ? r : 0 }
+  readonly property real radius: deskDots.pill(height / 2)
   // Room around the pill for the blur to reach in from, as far as Hyprland's
   // passes spread it.
   readonly property real reach: Math.max(8, Math.min(96,
@@ -142,7 +145,7 @@ Item {
     anchors.verticalCenter: parent.verticalCenter
     width: (deskDots.markTo - deskDots.markFrom) * deskDots.step + deskDots.dot + 2 * deskDots.markPad
     height: deskDots.dot + 2 * deskDots.markPad
-    radius: surface.rounded(height / 2)
+    radius: deskDots.pill(height / 2)
     color: Commons.Color.accent
   }
 
@@ -175,7 +178,7 @@ Item {
       anchors.verticalCenter: parent.verticalCenter
       width: deskDots.dot
       height: deskDots.dot
-      radius: surface.rounded(width / 2)
+      radius: deskDots.pill(width / 2)
       color: laneDot.filled ? laneDot.tint(Qt.rgba(1, 1, 1, 0.55), Qt.alpha(deskDots.onMark, 0.85))
                             : "transparent"
       border.width: laneDot.filled ? 0 : 1

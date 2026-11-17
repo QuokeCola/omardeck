@@ -13,6 +13,18 @@ Item {
 
   readonly property int tall: card.pxH + card.pxBar
 
+  // Under a titlebar, the bar's colour behind the window's top corners. Hyprland
+  // rounds those corners too and the bar shows in the gap; a card's bar stops at
+  // the window's top edge, and the wallpaper showed there instead. A strip as
+  // deep as the corner, under the window, which covers all of it but the gaps.
+  Rectangle {
+    visible: card.barH > 0.5 && card.radius > 0.5
+    width: card.width
+    height: card.radius
+    color: overlay.deco.barColor
+    opacity: card.real.opacity ?? 1
+  }
+
   ShaderEffect {
     id: shadowEffect
     readonly property int reach: Math.round((overlay.deco.border + overlay.deco.shadowRange) * surface.hyprScale)

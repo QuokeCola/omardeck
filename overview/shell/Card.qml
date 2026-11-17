@@ -5,9 +5,9 @@ import "../../look" as Looks
 // One window's card. All of its motion lives here: where it stands, blended with
 // where it goes, and where it flies when dropped on another desktop.
 //
-// `waiting` and `shown` stay on this root: the surface's `captured` and
+// `waiting`, `shown` and `stacked` stay on this root: the surface's `captured` and
 // `floatStack` read them through Repeater.itemAt, which does not notify, and depend
-// on those two being captured as they are read.
+// on those being captured as they are read.
 Item {
   id: card
 
@@ -24,6 +24,11 @@ Item {
   // Whether the window has a panel of its own on the desktop. A maximized or fullscreen
   // one doesn't, so giving its card one would change its tone as the overview opens.
   readonly property bool ownPanel: card.floating && card.modelData.fullscreen !== true
+  // Hidden on the desktop, under a maximized window (see `under` in
+  // WindowSnapshot.qml): its card comes in as the cards spread, and goes as they
+  // close, rather than standing whole where no window shows.
+  readonly property bool under: card.real.under === true
+  readonly property real reveal: card.under ? Math.min(1, card.along * 2.5) : 1
   // Standing in for a window that is actually on this screen right now.
   // A scrolling layout keeps windows parked off either edge; those
   // cover nothing, and some never produce a frame to wait for.
@@ -62,6 +67,14 @@ Item {
   // overview has gone.
   readonly property bool fading: !card.shown && surface.searching
                                  && overlay.wsOf(card.modelData) === surface.shownWorkspace
+  // Still one of the floating windows on screen, as the blur and the stacking
+  // see it: shown, or left out by a search or an app's overview and not yet
+  // faded away. A card dropped from the stack the moment it was left out fell
+  // under every other floating card, so it vanished at once wherever one
+  // covered it, and the see-through cards over it stopped blurring it. A
+  // property of its own, read by `floatStack`: `opacity` changes every frame of
+  // the fade, and a stack rebuilt every frame rebuilds every blur with it.
+  readonly property bool stacked: card.shown || (card.fading && card.opacity > 0.01)
   readonly property bool hovered: hover.hovered && overlay.active
   readonly property bool picked: card.hovered || overlay.selectedKey === card.modelData.key
   readonly property bool dragging: dragger.active
@@ -306,9 +319,11 @@ Item {
   Behavior on height { enabled: overlay.active && !card.dragging && !card.flying && card.back >= 1 && !overlay.moving && !overlay.settling; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
 
   // Floating cards stack as their windows do; see `floatStack`.
+  // One fading out keeps its place among them until it has gone.
   z: card.dragging || card.flying ? 100
+     : card.floating && card.stacked ? 1 + surface.floatStack.indexOf(card.modelData.key)
      : card.fading ? 0
-     : (card.floating ? 1 + surface.floatStack.indexOf(card.modelData.key) : (card.picked ? 2 : 1))
+     : (card.picked ? 2 : 1)
   // Held, it shrinks the way a thing you have picked up does — and
   // shrinks further over somewhere it would land, so it stops covering
   // what it is about to drop into.
@@ -320,7 +335,7 @@ Item {
        : (card.picked && overlay.active ? 1.035 : 1)
   opacity: card.handedOver || card.awaited ? 0
          : card.flying ? overlay.veil
-         : card.shown ? (card.dragging ? 0.94 : 1)
+         : card.shown ? (card.dragging ? 0.94 : 1) * card.reveal
          : card.fading ? Math.max(overlay.appOnly !== "" ? 1 - surface.appVeil : 0, 1 - card.along * 2.5) : 0
   visible: card.opacity > 0.01
   // Not as it takes off: the card swaps its shrink for its size in the
@@ -334,7 +349,8 @@ Item {
   // Behavior restarted every frame never leaves where it started — the
   // window popped in whole once the overview had gone. Held open, though,
   // a card the search has just left out still eases away.
-  Behavior on opacity { enabled: !surface.sliding && !card.parked && (!card.fading || overlay.still) && !card.awaited && !card.tookOver; NumberAnimation { duration: 150 } }
+  // Nor one coming in from under a maximized window, for the same reason.
+  Behavior on opacity { enabled: !surface.sliding && !card.parked && ((!card.fading && !card.under) || overlay.still) && !card.awaited && !card.tookOver; NumberAnimation { duration: 150 } }
 
   // Hyprland's rounding on the desktop, the overview's own once spread,
   // never rounder than Hyprland's.
@@ -383,13 +399,21 @@ Item {
   // Hairline at rest, accent ring under the pointer, bright ring for a
   // window something is about to be dropped onto.
   Rectangle {
+    id: ring
+    // A hairline lies on the card's own edge. Anything wider is put on round
+    // the outside of it, its corner grown by as much: drawn inward, a wide
+    // ring on a small corner left almost no curve on its inner edge, and it
+    // covered the edge of the window.
+    readonly property real wide: overlay.look.ringWidth(card.flying, card.landing, card.picked)
+    readonly property real out: ring.wide > 1 ? ring.wide : 0
     anchors.fill: parent
-    anchors.topMargin: -card.barH
-    radius: card.radius
+    anchors.margins: -ring.out
+    anchors.topMargin: -card.barH - ring.out
+    radius: card.radius > 0 ? card.radius + ring.out : 0
     color: "transparent"
     // In a tile it is a miniature, not a card you can pick: the tile's
     // own hairline is the only outline.
-    border.width: overlay.look.ringWidth(card.flying, card.landing, card.picked)
+    border.width: ring.wide
     border.color: card.landing ? overlay.look.ink("#F2EFE7") : (card.picked ? Commons.Color.accent : Qt.rgba(1, 1, 1, 0.14))
     opacity: overlay.dress
   }

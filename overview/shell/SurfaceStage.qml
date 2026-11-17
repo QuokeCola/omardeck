@@ -61,12 +61,13 @@ Item {
   function rounded(r) { return Math.min(r, overlay.deco.rounding) }
 
   // The floating windows' cards on screen, bottom to top, in the order
-  // Hyprland draws them (see `zOrder`).
+  // Hyprland draws them (see `zOrder`). One fading out stays among them until
+  // it has gone (see `stacked` in Card.qml).
   readonly property var floatStack: {
     const out = []
     for (let i = 0; i < floatCards.count; i++) {
       const card = floatCards.itemAt(i)
-      if (!card || !card.shown) continue
+      if (!card || !card.stacked) continue
       const z = overlay.zOrder[card.modelData.key]
       out.push({ key: card.modelData.key, z: typeof z === "number" ? z : -1 })
     }
@@ -251,8 +252,10 @@ Item {
     target: surface
     property: "appVeil"
     to: 1
-    duration: 260
-    easing.type: Easing.OutCubic
+    // Even at both ends: eased out only, most of the fade was over in the
+    // first few frames and the windows seemed to blink away.
+    duration: 320
+    easing.type: Easing.InOutQuad
   }
 
   readonly property var windows: {
