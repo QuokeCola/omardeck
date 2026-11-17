@@ -24,6 +24,10 @@ import qs.Ui
 //             windows stop short of it; it steps aside only for a fullscreen one)
 //   slideToWindow  clicking an app whose one window is on another desktop:
 //             true (default) has Aerial slide there; false switches at once
+//   genie         minimizing pours the window into its icon, and restoring
+//                 pours it back out (default true)
+//   hoverWindows  resting the pointer on an app with several windows lists
+//                 them above its icon, to pick one (default true)
 //   windowPicker  clicking an app with several windows: "aerial" opens
 //             Aerial's overview on just that app's windows; "cycle" focuses
 //             them in turn
@@ -62,6 +66,12 @@ Item {
   readonly property real magnify: Math.max(1, Math.min(2, Number(config.magnify) || 1.45))
   readonly property bool slideToWindow: config.slideToWindow !== false
   readonly property string windowPicker: config.windowPicker === "cycle" ? "cycle" : "aerial"
+  // Resting the pointer on an app brings up one panel: its windows to pick from,
+  // or its name when it has none.
+  readonly property bool hoverWindows: config.hoverWindows !== false
+  readonly property int hoverDelay: 350
+  // Between the dock's top edge and the panel that hover brings up.
+  readonly property int hoverGap: 8
   readonly property string autohide: ["smart", "always", "never"].indexOf(config.autohide) >= 0 ? config.autohide : "smart"
 
   // The panel's height is set on its own, so smaller icons get more air
@@ -485,6 +495,10 @@ Item {
     if (!wins.length) { root.launch(key); return }
     // Several windows: let Aerial lay them out to pick from; choosing one
     // takes you to its desktop the way the overview always does.
+    // A minimized window comes back first, one per click: the icon is the only way
+    // to it, and the overview has no desktop to show it on.
+    var waiting = wins.filter(root.isMinimized)
+    if (waiting.length) { root.restoreWindow(waiting[0]); return }
     if (wins.length > 1 && root.windowPicker === "aerial" && root.overview) {
       root.overview.showApp(String(wins[0].class))
       return
@@ -497,12 +511,128 @@ Item {
     var stable = wins.slice().sort(function(a, b) { return a.address < b.address ? -1 : 1 })
     var at = 0
     for (var j = 0; j < stable.length; j++) if (stable[j].address === root.activeAddress) at = j
-    root.focusWindow(stable[(at + 1) % stable.length].address)
+    var next = stable[(at + 1) % stable.length]
+    if (root.isMinimized(next)) root.restoreWindow(next)
+    else root.focusWindow(next.address)
+  }
+
+  // ------------------------------------------------------------------ genie
+  // Minimizing pours the window into its icon and restoring pours it back out
+  // (see Genie.qml). Either falls back to the plain move whenever a picture of
+  // the window or a place for it can't be had.
+  readonly property bool genieOn: config.genie !== false
+  Genie { id: genie }
+  readonly property string genieScreen: genie.active ? genie.screenName : ""
+
+  function monitorById(id) { return (Hyprland.monitors.values || []).find(function(m) { return m.id === id }) || null }
+  function panelOn(name) {
+    var all = panels.instances || []
+    for (var i = 0; i < all.length; i++) if (all[i].modelData.name === name) return all[i]
+    return null
+  }
+  function keyOfWindow(addr) {
+    for (var k in root.windowsByKey) {
+      var wins = root.windowsByKey[k]
+      for (var i = 0; i < wins.length; i++) if (wins[i].address === addr) return k
+    }
+    return ""
+  }
+  function clientAt(addr) { return root.clients.find(function(c) { return c.address === addr }) || null }
+  // What the genie needs to play `win` on `mon`: null when any of it is missing.
+  // `at` is the window's corner in the layout, as Hyprland reports it.
+  function genieJob(win, mon, at, size) {
+    if (!root.genieOn || !win || !mon || !win.tl || !win.tl.wayland || !(size[0] > 1 && size[1] > 1)) return null
+    var panel = root.panelOn(mon.name)
+    var sink = panel ? panel.iconRect(root.keyOfWindow(win.address)) : null
+    if (!sink) return null
+    var deco = root.overview && root.overview.deco ? root.overview.deco : null
+    return {
+      screen: mon.name, capture: win.tl.wayland, sink: sink,
+      win: Qt.rect(at[0] - mon.x, at[1] - mon.y, size[0], size[1]),
+      barH: deco && deco.bars ? deco.barHeight : 0,
+      barColor: deco ? deco.barColor : "transparent",
+      rounding: deco ? deco.rounding : 0,
+      deco: deco, title: root.nameFor(root.keyOfWindow(win.address))
+    }
+  }
+  function setNoAnim(addr, on) {
+    root.hypr('hl.dsp.window.set_prop({ prop = "no_anim", value = "' + (on ? "1" : "unset") + '", window = "address:' + addr + '" })')
+  }
+  function stockMinimize(addr) { Quickshell.execDetached(["omarchy-hyprland-window-minimize", addr]) }
+
+  IpcHandler {
+    target: "quokecola.omardeck.dock"
+    // From dock/bin/minimize, which has checked the window may be minimized and
+    // read where it is: a floating window moves without an event, so what this
+    // service last heard may be stale. "ok" means the dock has taken it on; on
+    // any other answer the caller minimizes it the plain way.
+    function minimize(address: string, x: int, y: int, w: int, h: int): string {
+      if (!/^0x[0-9a-f]+$/.test(address)) return "error: invalid address"
+      var win = root.clientAt(address)
+      var job = win ? root.genieJob(win, root.monitorById(win.monitor), [x, y], [w, h]) : null
+      if (!job) return "no"
+      job.minimizing = true
+      job.ready = function() { root.setNoAnim(address, true); root.stockMinimize(address) }
+      job.fallback = function() { root.stockMinimize(address) }
+      job.done = function() { restoreSettle.targets = restoreSettle.targets.concat(['window = "address:' + address + '"']); restoreSettle.restart() }
+      genie.play(job)
+      return "ok"
+    }
+    // Bring a minimized window back, as a click on its icon does.
+    function restore(address: string): string {
+      if (!/^0x[0-9a-f]+$/.test(address)) return "error: invalid address"
+      var win = root.clientAt(address)
+      if (!win || !root.isMinimized(win)) return "no"
+      root.restoreWindow(win)
+      return "ok"
+    }
+  }
+
+  function isMinimized(win) { return !!win && !!win.workspace && win.workspace.name === root.minimizedWorkspace }
+
+  // A minimized window waits on a special workspace. Focusing it there would only
+  // show that workspace over the desktop, the window still on it: it is moved back
+  // to the workspace in front of the user first, as Omarchy's own dock does, then
+  // focused and raised. Without animating in: it is simply there again.
+  function restoreWindow(win) {
+    var mon = Hyprland.focusedMonitor
+    var workspace = mon && mon.activeWorkspace ? mon.activeWorkspace.id : -1
+    if (!(workspace >= 1)) return
+    // Poured out of the icon first, to where the window will stand: a floating
+    // window keeps its place, carried over when it comes back on another monitor.
+    var from = root.monitorById(win.monitor)
+    var at = from && from.id !== mon.id ? [win.at[0] - from.x + mon.x, win.at[1] - from.y + mon.y] : win.at
+    var job = root.genieJob(win, mon, at, win.size)
+    if (!job) { root.placeWindow(win, workspace); return }
+    job.minimizing = false
+    job.done = function() { root.placeWindow(win, workspace) }
+    job.fallback = job.done
+    genie.play(job)
+  }
+  function placeWindow(win, workspace) {
+    var target = 'window = "address:' + win.address + '"'
+    root.hypr('hl.dsp.window.set_prop({ prop = "no_anim", value = "1", ' + target + ' })')
+    root.hypr('hl.dsp.window.move({ workspace = "' + workspace + '", ' + target + ' })')
+    root.hypr('hl.dsp.focus({ ' + target + ' })')
+    root.hypr('hl.dsp.window.alter_zorder({ mode = "top", ' + target + ' })')
+    restoreSettle.targets = restoreSettle.targets.concat([target])
+    restoreSettle.restart()
+  }
+  Timer {
+    id: restoreSettle
+    property var targets: []
+    interval: 400
+    onTriggered: {
+      for (var i = 0; i < targets.length; i++)
+        root.hypr('hl.dsp.window.set_prop({ prop = "no_anim", value = "unset", ' + targets[i] + ' })')
+      targets = []
+    }
   }
 
   // Off on another desktop: the overview slides there. Mid-swipe or
   // half open it can't, and the window is focused straight away instead.
   function goToWindow(win) {
+    if (root.isMinimized(win)) { root.restoreWindow(win); return }
     var mon = null
     for (var m = 0; m < root.monitors.length; m++) if (root.monitors[m].id === win.monitor) mon = root.monitors[m]
     var here = mon && mon.activeWorkspace && mon.activeWorkspace.id === win.workspace.id
@@ -569,10 +699,27 @@ Item {
         property bool hovered: false
         property bool lingering: false
         property string menuKey: ""
+
+        // Where an app's icon is on this screen, for the genie to pour into. On the
+        // screen's bottom edge while the dock is slid away. Null with no such icon.
+        function iconRect(key) {
+          if (!key) return null
+          for (var i = 0; i < cellRepeater.count; i++) {
+            var slot = cellRepeater.itemAt(i)
+            if (!slot || slot.key !== key || slot.leaving) continue
+            var p = slot.cellItem.mapToItem(panel.contentItem, 0, 0)
+            var sw = panel.screen ? panel.screen.width : panel.width
+            var sh = panel.screen ? panel.screen.height : panel.height
+            var y = Math.min(sh - 2, sh - panel.height + p.y)
+            return Qt.rect((sw - panel.width) / 2 + p.x, y, slot.cellItem.width, Math.min(slot.cellItem.height, sh - y))
+          }
+          return null
+        }
         // Never hiding still gives way to a fullscreen window, as the bar does.
         readonly property bool wantHidden: root.autohide === "always" || (root.autohide === "smart" && overlapped)
                                            || (root.autohide === "never" && coverage.fullscreen)
-        readonly property bool revealed: !wantHidden || hovered || lingering || menuKey !== "" || dragUid >= 0
+        readonly property bool revealed: !wantHidden || hovered || lingering || menuKey !== "" || peekKey !== "" || dragUid >= 0
+                                        || root.genieScreen === modelData.name
 
         onHoveredChanged: if (!hovered) { lingering = true; lingerTimer.restart() }
 
@@ -654,6 +801,7 @@ Item {
 
         function startDrag(slot, cell, p) {
           panel.closeMenu()
+          panel.closePeek()
           var c = cell.mapToItem(row, 0, 0)
           // Pressed on a magnified icon: keep the same spot of it in hand
           // as it shrinks back to its resting size.
@@ -763,7 +911,13 @@ Item {
               y: panel.snap(parent.height - root.edgeGap - height)
               height: panel.snap(root.dockHeight)
               width: Math.max(0, row.width - panel.snap(root.spacing)) + panel.snap(root.leadLeft) + panel.snap(root.leadRight)
-              radius: root.holo ? 0 : Math.min(14, Style.cornerRadius)
+              // Flush against the screen edge, only the top corners round: the bottom
+              // ones would cut notches out of the edge.
+              readonly property real corner: root.holo ? 0 : Math.min(14, Style.cornerRadius)
+              topLeftRadius: corner
+              topRightRadius: corner
+              bottomLeftRadius: root.edgeGap > 0 ? corner : 0
+              bottomRightRadius: root.edgeGap > 0 ? corner : 0
               color: slider.holo ? "transparent" : Commons.Color.bar.background
               border.width: slider.holo ? 0 : 1
               border.color: Util.alpha(Commons.Color.bar.text, 0.12)
@@ -854,6 +1008,7 @@ Item {
                   function settle() { settleAnim.restart() }
                   NumberAnimation { id: settleAnim; target: cell; property: "settleT"; from: 1; to: 0; duration: Style.duration(260); easing.type: Easing.OutCubic }
 
+                  readonly property alias cellItem: cell
                   Item {
                     id: cell
                     readonly property string key: slot.key
@@ -1158,26 +1313,28 @@ Item {
                     Rectangle {
                       id: tip
                       readonly property bool removing: cell.dragged && panel.removing
-                      visible: removing || (!cell.isSep && mouse.containsMouse && panel.menuKey === "" && !mouse.pressed && panel.dragUid < 0)
+                      // The window list stands in for the name once the app has windows.
+                      readonly property bool listed: panel.peeks(cell)
+                      visible: removing || (!cell.isSep && mouse.containsMouse && panel.menuKey === "" && !tip.listed && !mouse.pressed && panel.dragUid < 0)
                       anchors.horizontalCenter: parent.horizontalCenter
                       anchors.bottom: icon.top
                       // Under the holographic theme, clear of the panel's top edge and its marks.
                       anchors.bottomMargin: root.holo ? panel.snap(root.padding + root.tile) : 8
-                      width: root.holo ? Math.ceil((tipText.implicitWidth + root.tile * 2) / (root.tile * 2)) * root.tile * 2 : tipText.implicitWidth + 16
-                      height: root.holo ? root.tile * 4 : tipText.implicitHeight + 8
-                      radius: root.holo ? 0 : Math.min(6, Style.cornerRadius)
-                      color: root.holo ? Util.alpha(Commons.Color.pick("holo.ink", "#0B161D"), 0.85) : Commons.Color.tooltip.background
+                      width: root.holo ? Math.ceil((tipText.implicitWidth + root.tile * 2) / (root.tile * 2)) * root.tile * 2 : tipText.implicitWidth + 28
+                      height: root.holo ? root.tile * 4 : tipText.implicitHeight + 18
+                      radius: root.holo ? 0 : Math.min(12, Style.cornerRadius)
+                      color: root.holo ? Util.alpha(Commons.Color.pick("holo.ink", "#0B161D"), 0.85) : Commons.Color.menu.background
                       border.width: root.holo ? 0 : 1
                       // The theme's plate is pale, and its own border pale on it: use the ink,
                       // or the plate has no edge over a light window.
-                      border.color: root.holo ? Util.alpha(Commons.Color.tooltip.text, 0.6) : Util.alpha(Commons.Color.tooltip.border, 0.3)
+                      border.color: root.holo ? Util.alpha(Commons.Color.tooltip.text, 0.6) : Commons.Color.menu.border
                       Text {
                         id: tipText
                         anchors.centerIn: parent
                         text: tip.removing ? "Remove from Dock" : cell.isSep ? "" : root.nameFor(cell.key)
                         textFormat: Text.PlainText
-                        color: root.holo ? Commons.Color.pick("holo.line", Commons.Color.tooltip.text) : Commons.Color.tooltip.text
-                        font.family: root.holo ? Style.font.family : Qt.application.font.family
+                        color: root.holo ? Commons.Color.pick("holo.line", Commons.Color.tooltip.text) : Commons.Color.menu.text
+                        font.family: root.holo ? Style.font.family : Style.font.menuFamily
                         font.pixelSize: root.holo ? Math.max(9, Style.font.body) : Style.font.body
                       }
                       // Under the holographic theme, a bracket at each corner, a tile long. After
@@ -1228,10 +1385,12 @@ Item {
                         }
                         panel.dragTo(p)
                       }
+                      onContainsMouseChanged: containsMouse ? panel.peekEnter(cell) : panel.peekLeave(cell)
                       onReleased: if (moved && cell.dragged) panel.endDrag(false)
                       onCanceled: if (moved && cell.dragged) panel.endDrag(true)
                       onClicked: function(ev) {
                         if (moved) return
+                        panel.closePeek()
                         if (ev.button !== Qt.RightButton) panel.closeMenu()
                         if (ev.button === Qt.LeftButton) root.activate(cell.key)
                         else if (ev.button === Qt.MiddleButton) root.launch(cell.key)
@@ -1254,9 +1413,223 @@ Item {
           menu.anchor.rect.y = p.y - 6
           menu.anchor.rect.width = cell.width
           menu.anchor.rect.height = 1
+          panel.closePeek()
           panel.menuCell = cell
           panel.menuKey = cell.key
           menu.visible = true
+        }
+
+        // -------------------------------------------------------- hover panel
+        // Resting on an icon brings up one panel above the dock: the app's windows
+        // to pick from, or its name when it has none. No focus grab: it is there
+        // while the pointer is on the icon or the panel, and a beat after, long
+        // enough to cross the gap between the two.
+        //
+        // One surface for the whole dock, as wide as it, mapped once. Moving to
+        // another icon glides the card along and resizes it while what it lists
+        // fades over, rather than closing one popup and opening the next.
+        property string peekKey: ""    // the icon it belongs to
+        property string peekShown: ""  // whose windows it lists: peekKey, a fade behind
+        property real peekX: 0         // the centre of the icon it is over, across this surface
+        property real peekNextX: 0     // and of the one it is about to move to
+        // The holographic theme keeps its own name plate for an app without windows.
+        function peeks(cell) { return root.hoverWindows && !cell.isSep && (cell.wins.length > 0 || !root.holo) }
+        function closePeek() { peekOpen.stop(); peekClose.stop(); peek.visible = false }
+        function openPeek(cell) {
+          if (!cell || !panel.peeks(cell) || panel.menuKey !== "" || panel.dragUid >= 0) return
+          // Where it is going. Taken up with what it lists, not before: the card's
+          // place and its size then leave together and arrive together.
+          panel.peekNextX = cell.mapToItem(panel.contentItem, cell.width / 2, 0).x
+          panel.peekKey = cell.key
+          if (peek.visible) {
+            if (panel.peekShown !== cell.key) peekSwap.restart()
+            return
+          }
+          // Fresh: in place at once, nothing to glide from.
+          peekCard.glide = false
+          peekSwap.stop()
+          peekCol.opacity = 1
+          panel.peekShown = cell.key
+          panel.peekX = panel.peekNextX
+          peek.anchor.rect.x = 0
+          peek.anchor.rect.y = dock.mapToItem(panel.contentItem, 0, 0).y - root.hoverGap + peek.spare
+          peek.anchor.rect.width = panel.width
+          peek.anchor.rect.height = 1
+          peek.visible = true
+          Qt.callLater(function() { peekCard.glide = true })
+        }
+        function peekEnter(cell) {
+          if (!panel.peeks(cell) || panel.dragUid >= 0) return
+          if (panel.peekKey === cell.key) { peekOpen.stop(); peekClose.stop(); return }
+          peekOpen.cell = cell
+          // Already up: follow the pointer along the dock without the wait.
+          peekOpen.interval = peek.visible ? 30 : root.hoverDelay
+          peekOpen.restart()
+        }
+        function peekLeave(cell) {
+          if (peekOpen.cell === cell) peekOpen.stop()
+          if (peek.visible) peekClose.restart()
+        }
+        Timer {
+          id: peekOpen
+          property var cell: null
+          onTriggered: {
+            if (cell && panel.peeks(cell)) { peekClose.stop(); panel.openPeek(cell) }
+            else panel.closePeek()
+          }
+        }
+        Timer { id: peekClose; interval: 260; onTriggered: peek.visible = false }
+
+        // To another icon: what is listed fades out, then in one step changes and the
+        // card sets off for its new place and size, and the new list fades in on the
+        // way. Place and size share a start, a duration and a curve, so each edge of
+        // the card travels straight to where it ends up; started apart, the edges
+        // overshot and came back.
+        SequentialAnimation {
+          id: peekSwap
+          NumberAnimation { target: peekCol; property: "opacity"; to: 0; duration: Style.duration(50) }
+          ScriptAction {
+            script: {
+              panel.peekShown = panel.peekKey
+              panel.peekX = panel.peekNextX
+            }
+          }
+          NumberAnimation { target: peekCol; property: "opacity"; to: 1; duration: Style.duration(150) }
+        }
+
+        PopupWindow {
+          id: peek
+          anchor.window: panel
+          anchor.edges: Edges.Top
+          anchor.gravity: Edges.Top
+          color: "transparent"
+          // Below the card, for it to rise out of as it appears.
+          readonly property int spare: 6
+          // As tall as the longest list any icon here would bring up, and kept at
+          // that: the card changes height inside it. Sized to the card instead, the
+          // surface was resized under it at every other icon, and for a frame the
+          // card stood where the old size put it — a jump up and back.
+          readonly property int mostRows: {
+            var most = 1
+            for (var k in root.windowsByKey) most = Math.max(most, root.windowsByKey[k].length)
+            return most
+          }
+          readonly property real room: mostRows * 32 + (mostRows - 1) * peekCol.spacing + 2 * peekCard.padding
+          implicitWidth: panel.width
+          implicitHeight: Math.ceil(room) + spare
+          // Only the card takes the pointer: the rest of this surface is empty.
+          mask: Region {
+            x: Math.floor(peekCard.x)
+            y: Math.floor(peekCard.y)
+            width: Math.ceil(peekCard.width)
+            height: Math.ceil(peekCard.height) + peek.spare
+          }
+          onVisibleChanged: {
+            if (visible) { peekCard.shown = 0; peekIn.restart() }
+            else { peekSwap.stop(); panel.peekKey = ""; panel.peekShown = "" }
+          }
+          readonly property var wins: root.windowsByKey[panel.peekShown] || []
+
+          ParallelAnimation {
+            id: peekIn
+            NumberAnimation {
+              target: peekCard; property: "shown"; from: 0; to: 1; duration: Style.duration(200)
+              easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1]
+            }
+            NumberAnimation {
+              target: peekCard; property: "opacity"; from: 0; to: 1; duration: Style.duration(100)
+              easing.type: Easing.BezierSpline; easing.bezierCurve: [0.5, 0.5, 0.75, 1, 1, 1]
+            }
+          }
+
+          BorderSurface {
+            id: peekCard
+            property real shown: 1
+            // Off while it is put in place, so it doesn't fly in from where it last was.
+            property bool glide: false
+            scale: 0.94 + 0.06 * shown
+            transformOrigin: Item.Bottom
+            transform: Translate { y: 6 * (1 - peekCard.shown) }
+            padding: Math.round(Style.space(6))
+            radius: root.holo ? 0 : Math.min(12, Style.cornerRadius)
+            color: Commons.Color.menu.background
+            borderSpec: Border.surfaceSpec("menu", "border", Commons.Color.menu.border, 1)
+            clip: true
+
+            // The size what it lists asks for. Each row's own width is asked, not the
+            // column's, which only ever reports the width it was given.
+            readonly property real rowsW: {
+              var w = 0
+              for (var i = 0; i < peekRows.count; i++) {
+                var row = peekRows.itemAt(i)
+                if (row) w = Math.max(w, row.implicitWidth)
+              }
+              return w
+            }
+            readonly property int count: peek.wins.length
+            readonly property real wantW: Math.round(count ? Math.max(232, Math.min(380, rowsW + 2 * padding))
+                                                           : peekName.implicitWidth + 24 + 2 * padding)
+            readonly property real wantH: Math.round((count ? count * 32 + (count - 1) * peekCol.spacing : 28) + 2 * padding)
+            // Its left edge at rest, on a whole pixel. The edge is what glides: were the
+            // centre to, the edge would follow both it and the width.
+            readonly property real wantX: Math.round(Math.max(0, Math.min(peek.width - wantW, panel.peekX - wantW / 2)))
+            width: wantW
+            height: wantH
+            x: wantX
+            y: peek.height - peek.spare - height
+            Behavior on x { enabled: peekCard.glide; NumberAnimation { duration: Style.duration(240); easing.type: Easing.OutCubic } }
+            Behavior on width { enabled: peekCard.glide; NumberAnimation { duration: Style.duration(240); easing.type: Easing.OutCubic } }
+            Behavior on height { enabled: peekCard.glide; NumberAnimation { duration: Style.duration(240); easing.type: Easing.OutCubic } }
+
+            HoverHandler {
+              onHoveredChanged: {
+                if (hovered) peekClose.stop()
+                else if (peek.visible) peekClose.restart()
+              }
+            }
+
+            // Laid out at the size the card is heading for, and clipped by it on the
+            // way: rows don't re-elide their titles every frame.
+            // Kept in the card's middle on the way, which at rest is its padding:
+            // held to the corner, a name sat up in the top left of a card still
+            // shrinking round it.
+            Column {
+              id: peekCol
+              x: (peekCard.width - width) / 2
+              y: (peekCard.height - (peekCard.wantH - 2 * peekCard.padding)) / 2
+              width: peekCard.wantW - 2 * peekCard.padding
+              spacing: 2
+              // No windows: the app's name, where its windows would be listed.
+              Item {
+                visible: peekCard.count === 0
+                width: parent.width
+                height: visible ? 28 : 0
+                Text {
+                  id: peekName
+                  anchors.centerIn: parent
+                  text: panel.peekShown ? root.nameFor(panel.peekShown) : ""
+                  textFormat: Text.PlainText
+                  color: Commons.Color.menu.text
+                  font.family: Style.font.menuFamily
+                  font.pixelSize: Style.font.body
+                }
+              }
+              Repeater {
+                id: peekRows
+                model: peek.wins
+                MenuRow {
+                  required property var modelData
+                  label: (modelData.tl ? modelData.tl.title : "") || modelData.class
+                  current: modelData.address === root.activeAddress
+                  badge: root.isMinimized(modelData) ? "minimized"
+                       : modelData.workspace && modelData.workspace.id > 0 ? String(modelData.workspace.name) : ""
+                  // Act, then close: closing empties the list, and this row with it,
+                  // after which nothing here can be named any more.
+                  onTriggered: { root.goToWindow(modelData); panel.closePeek() }
+                }
+              }
+            }
+          }
         }
 
         PopupWindow {
@@ -1414,8 +1787,15 @@ Item {
                   required property var modelData
                   label: (modelData.tl ? modelData.tl.title : "") || modelData.class
                   current: modelData.address === root.activeAddress
-                  badge: modelData.workspace && modelData.workspace.id > 0 ? String(modelData.workspace.name) : ""
-                  onTriggered: menu.run(function() { root.focusWindow(modelData.address) })
+                  badge: root.isMinimized(modelData) ? "minimized"
+                       : modelData.workspace && modelData.workspace.id > 0 ? String(modelData.workspace.name) : ""
+                  // Act, then close: closing empties the list, and this row with it,
+                  // after which nothing here can be named any more.
+                  onTriggered: {
+                    if (root.isMinimized(modelData)) root.restoreWindow(modelData)
+                    else root.focusWindow(modelData.address)
+                    menu.visible = false
+                  }
                 }
               }
 

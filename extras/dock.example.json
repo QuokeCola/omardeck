@@ -5,6 +5,8 @@
   "magnify": 1,
   "autohide": "smart",
   "slideToWindow": true,
+  "hoverWindows": true,
+  "genie": true,
   "windowPicker": "aerial",
   "classAliases": {}
 }

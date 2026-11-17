@@ -1,0 +1,32 @@
+#!/bin/bash
+
+# Minimize a window to the dock, poured into its icon.
+#
+# Stands in for omarchy-hyprland-window-minimize on SUPER+M and the titlebar's
+# minimize button (see dock/minimize.lua). Omarchy's command moves the window
+# away at once; this asks the dock first, which puts a picture of the window on
+# screen, has Omarchy's command take the real one, and plays the picture into the
+# icon. Whenever the dock can't, Omarchy's command runs as it always did.
+#
+#   minimize [window-address]    the active window when given none
+
+STOCK=omarchy-hyprland-window-minimize
+
+if [[ -n ${1:-} ]]; then
+  ADDRESS=$1
+  WINDOW=$(hyprctl clients -j | jq -c --arg address "$ADDRESS" 'first(.[] | select(.address == $address)) // empty')
+else
+  WINDOW=$(hyprctl activewindow -j | jq -c 'select(.address != null)')
+  ADDRESS=$(jq -r '.address // empty' <<<"$WINDOW")
+fi
+
+[[ -n $ADDRESS && -n $WINDOW ]] || exec "$STOCK" "$@"
+
+read -r WORKSPACE X Y W H < <(jq -r '"\(.workspace.id) \(.at[0]) \(.at[1]) \(.size[0]) \(.size[1])"' <<<"$WINDOW")
+[[ $WORKSPACE =~ ^[0-9]+$ ]] || exec "$STOCK" "$ADDRESS"
+
+# Omarchy only minimizes on a floating workspace, where the dock is.
+[[ $(omarchy-hyprland-workspace-layout-current "$WORKSPACE") == "floating" ]] || exit 0
+
+REPLY=$(timeout 2 omarchy-shell quokecola.omardeck.dock minimize "$ADDRESS" "$X" "$Y" "$W" "$H" 2>/dev/null)
+[[ $REPLY == ok ]] || exec "$STOCK" "$ADDRESS"
