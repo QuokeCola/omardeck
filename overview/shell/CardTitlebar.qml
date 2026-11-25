@@ -15,10 +15,11 @@ Item {
   readonly property var overlay: card.overlay
   readonly property var deco: bar.overlay.deco
 
-  // The plugin's buttons, right to left. Omarchy's three (see
-  // default/hypr/workspace-modes.lua); the plugin doesn't say which it has.
-  readonly property var buttons: ["×", "□", "−"]
-  readonly property real buttonSize: 20
+  // The plugin's buttons, right to left: Omarchy's three (see
+  // default/hypr/workspace-modes.lua) unless the note says otherwise (`barButtons`
+  // in app/Deco.js).
+  readonly property var buttons: bar.deco.barButtons || []
+  readonly property bool centred: bar.deco.barAlign === "center"
   readonly property string appName: bar.overlay.appNameFor(bar.card.modelData.appId)
 
   visible: bar.card.barH > 0.5
@@ -34,7 +35,7 @@ Item {
     height: Math.max(1, bar.card.real.bar || 0)
     transformOrigin: Item.TopLeft
     scale: bar.card.width / face.width
-    color: bar.deco.barColor
+    color: bar.card.focusedWindow ? bar.deco.barColor : bar.deco.barColorInactive
     // The card's own corner, whatever size the card is drawn at (the face is laid
     // out at the window's size and scaled), and a little tighter than it: the bar
     // then runs just under the border's rounded corner. Cut to the very same arc,
@@ -46,11 +47,15 @@ Item {
     Text {
       textFormat: Text.PlainText
       visible: bar.deco.barTitle
+      // In the middle of the bar, as the plugin has it, and so kept clear of the
+      // buttons on both sides; or from the left edge up to them.
       anchors.left: parent.left
-      anchors.leftMargin: bar.deco.barPadding
+      anchors.leftMargin: bar.centred ? glyphs.width + 2 * bar.deco.barPadding : bar.deco.barPadding
       anchors.right: glyphs.left
       anchors.rightMargin: bar.deco.barPadding
       anchors.verticalCenter: parent.verticalCenter
+      horizontalAlignment: bar.centred ? Text.AlignHCenter : Text.AlignLeft
+      font.weight: bar.deco.barWeight
       // What the real bar says: the app's name, and the window's title only when
       // no launcher claims it. The card's caption has the title.
       text: bar.appName !== "" ? bar.appName
@@ -71,17 +76,32 @@ Item {
 
       Repeater {
         model: bar.buttons
-        Text {
-          required property string modelData
-          textFormat: Text.PlainText
-          width: bar.buttonSize
-          height: bar.buttonSize
-          horizontalAlignment: Text.AlignHCenter
-          verticalAlignment: Text.AlignVCenter
-          text: modelData
-          color: bar.deco.barText
-          font.family: bar.deco.barFont
-          font.pixelSize: Math.round(bar.buttonSize * 0.7)
+        Item {
+          id: button
+          required property var modelData
+          readonly property bool round: bar.deco.barShape === "circle"
+          width: modelData.size
+          height: modelData.size
+          // The disc of a round button, at rest: the pointer is never on a card's.
+          Rectangle {
+            visible: button.round
+            anchors.centerIn: parent
+            width: bar.deco.barDot
+            height: width
+            radius: width / 2
+            color: bar.card.focusedWindow ? bar.deco.barRest : bar.deco.barRestInactive
+          }
+          Text {
+            anchors.fill: parent
+            opacity: button.round && !bar.card.focusedWindow ? 0.6 : 1
+            textFormat: Text.PlainText
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            text: button.modelData.icon
+            color: (button.round && bar.deco.barGlyphRest) || button.modelData.fg || bar.deco.barText
+            font.family: bar.deco.barFont
+            font.pixelSize: Math.round(button.modelData.size * (button.round ? 0.5 : 0.7))
+          }
         }
       }
     }

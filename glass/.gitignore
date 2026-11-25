@@ -1,2 +1,2 @@
 liquidglass.so
-src/glass.frag.inc
+src/*.frag.inc

@@ -47,6 +47,27 @@ const DEFAULTS = {
   barButtonPadding: 8,
   barTitle: true,
   barTag: "",
+  // The bar of a window that is not in use; the same as `barColor` when the
+  // plugin has none of its own.
+  barColorInactive: "transparent",
+  // What the plugin can't be asked, from the note dock/minimize.lua leaves (see
+  // barStyle): where the title sits, how heavy it is, and the buttons, right to
+  // left, each { icon, fg, size }.
+  barAlign: "left",
+  barWeight: 400,
+  barButtons: [
+    { icon: "×", fg: "", size: 20 }, { icon: "□", fg: "", size: 20 }, { icon: "−", fg: "", size: 20 },
+  ],
+  // "circle": each button is its icon, in `barGlyphRest`, on a disc `barDot`
+  // across in `barRest` (or `barRestInactive` on a bar not in use). Anything
+  // else: the icons alone.
+  barShape: "icon",
+  barDot: 12,
+  barRest: "",
+  barRestInactive: "",
+  barGlyphRest: "",
+  // The plugin can pour a window into the dock itself (glass/src/genie.inc).
+  genie: false,
 };
 
 const OPTIONS = [
@@ -72,6 +93,7 @@ const OPTIONS = [
   "plugin:hyprbars:bar_text_size", "plugin:hyprbars:bar_text_font",
   "plugin:hyprbars:bar_padding", "plugin:hyprbars:bar_button_padding",
   "plugin:hyprbars:bar_title_enabled", "plugin:hyprbars:workspace_tag",
+  "plugin:liquidglass:genie", "plugin:hyprbars:bar_color_inactive",
 ];
 
 // Hyprland prints colours as AARRGGBB, which is what Qt reads after a "#". A
@@ -162,9 +184,55 @@ function parse(text) {
     // Hyprland's default is on; unset, it reads as that.
     barTitle: !byName["plugin:hyprbars:bar_title_enabled"] || on("plugin:hyprbars:bar_title_enabled"),
     barTag: (byName["plugin:hyprbars:workspace_tag"] || {}).str || "",
+    genie: on("plugin:liquidglass:genie"),
+    // 0 is the plugin's "none of its own".
+    barColorInactive: num("plugin:hyprbars:bar_color_inactive") !== 0
+      ? intColourOf(byName["plugin:hyprbars:bar_color_inactive"]) : intColourOf(byName["plugin:hyprbars:bar_color"]),
+    barAlign: DEFAULTS.barAlign,
+    barWeight: DEFAULTS.barWeight,
+    barButtons: DEFAULTS.barButtons,
+    barShape: DEFAULTS.barShape,
+    barDot: DEFAULTS.barDot,
+    barRest: DEFAULTS.barRest,
+    barRestInactive: DEFAULTS.barRestInactive,
+    barGlyphRest: DEFAULTS.barGlyphRest,
   };
 }
 
+// "rgb(RRGGBB)" or "rgba(RRGGBBAA)", as Hyprland's config writes a colour.
+function configColourOf(text) {
+  const m = /^\s*rgba?\(\s*([0-9a-fA-F]{6})([0-9a-fA-F]{2})?\s*\)\s*$/.exec(String(text || ""));
+  return m ? "#" + (m[2] || "") + m[1] : "";
+}
+
+const WEIGHTS = { thin: 100, light: 300, normal: 400, regular: 400, medium: 500, semibold: 600, bold: 700, heavy: 900 };
+
+/** The titlebar's style from the note dock/minimize.lua writes; {} when there is none. */
+function barStyle(text) {
+  let note;
+  try { note = JSON.parse(String(text)); } catch (e) { return {}; }
+  if (!note || typeof note !== "object") return {};
+  const out = {};
+  if (note.align === "left" || note.align === "center") out.barAlign = note.align;
+  const weight = typeof note.weight === "number" ? note.weight : WEIGHTS[String(note.weight || "").toLowerCase()];
+  if (weight >= 100 && weight <= 1000) out.barWeight = weight;
+  if (note.shape === "circle" && configColourOf(note.rest) !== "") {
+    out.barShape = "circle";
+    out.barDot = Math.max(4, Math.min(64, Number(note.dot) || 12));
+    out.barRest = configColourOf(note.rest);
+    out.barRestInactive = configColourOf(note.restInactive) || out.barRest;
+    out.barGlyphRest = configColourOf(note.glyphRest);
+  }
+  if (Array.isArray(note.buttons) && note.buttons.length) {
+    out.barButtons = note.buttons.slice(0, 8).map(b => ({
+      icon: String((b && b.icon) || "").slice(0, 8),
+      fg: configColourOf(b && b.fg),
+      size: Math.max(8, Math.min(64, Number(b && b.size) || 20)),
+    }));
+  }
+  return out;
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { DEFAULTS, OPTIONS, colourOf, intColourOf, vecOf, parse };
+  module.exports = { DEFAULTS, OPTIONS, colourOf, intColourOf, vecOf, parse, configColourOf, barStyle };
 }

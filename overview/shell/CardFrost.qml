@@ -26,7 +26,7 @@ ShaderEffect {
   property vector4d area: {
     const w = card.width * card.scale
     const h = card.height * card.scale
-    const x = card.x + (card.width - w) / 2
+    const x = card.stageX + (card.width - w) / 2
     const y = card.y + (card.height - h) / 2
     return Qt.vector4d(x / Math.max(1, surface.width), y / Math.max(1, surface.height),
                        w / Math.max(1, surface.width), h / Math.max(1, surface.height))

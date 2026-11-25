@@ -66,7 +66,8 @@ Item {
   readonly property var floatStack: {
     const out = []
     for (let i = 0; i < floatCards.count; i++) {
-      const card = floatCards.itemAt(i)
+      const page = floatCards.itemAt(i)
+      const card = page ? page.card : null
       if (!card || !card.stacked) continue
       const z = overlay.zOrder[card.modelData.key]
       out.push({ key: card.modelData.key, z: typeof z === "number" ? z : -1 })
@@ -77,7 +78,8 @@ Item {
 
   function floatCardFor(key) {
     for (let i = 0; i < floatCards.count; i++) {
-      const card = floatCards.itemAt(i)
+      const page = floatCards.itemAt(i)
+      const card = page ? page.card : null
       if (card && card.modelData.key === key) return card
     }
     return null
@@ -146,7 +148,8 @@ Item {
       const missed = Object.assign({}, surface.missed)
       for (const list of [tiledCards, floatCards])
         for (let i = 0; i < list.count; i++) {
-          const c = list.itemAt(i)
+          const p = list.itemAt(i)
+          const c = p ? p.card : null
           if (c && c.waiting) missed[c.modelData.key] = true
         }
       surface.missed = missed
@@ -171,7 +174,8 @@ Item {
   readonly property bool captured: {
     for (const list of [tiledCards, floatCards]) {
       for (let i = 0; i < list.count; i++) {
-        const card = list.itemAt(i)
+        const page = list.itemAt(i)
+        const card = page ? page.card : null
         if (card && card.waiting) return false
       }
     }
@@ -577,8 +581,25 @@ Item {
   Component {
     id: cardDelegate
 
-    Card {
-      surface: thisSurface
+    // The card's page: the screen's size, and all of the card that shows. It is
+    // the page that slides, a screen over for each desktop over, so each desktop's
+    // windows are cut where its screen ends (see `carried` in Card.qml).
+    Item {
+      id: page
+      required property var modelData
+      readonly property alias card: card
+      x: card.carried
+      z: card.z
+      width: thisSurface.width
+      height: thisSurface.height
+      // Only while it matters: a clip costs a batch of its own.
+      clip: thisSurface.sliding || page.x !== 0
+
+      Card {
+        id: card
+        surface: thisSurface
+        modelData: page.modelData
+      }
     }
   }
 

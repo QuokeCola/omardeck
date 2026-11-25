@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import Quickshell.Io
 import "../app/Deco.js" as Deco
 
@@ -12,7 +13,10 @@ import "../app/Deco.js" as Deco
 Item {
   id: reader
 
-  property var deco: Deco.DEFAULTS
+  // What Hyprland answered, and over it what the titlebar's note says.
+  property var asked: Deco.DEFAULTS
+  property var barStyle: ({})
+  readonly property var deco: Object.assign({}, reader.asked, reader.barStyle)
   readonly property var options: Deco.OPTIONS
 
   Process {
@@ -26,7 +30,19 @@ Item {
 
   function colourOf(entry) { return Deco.colourOf(entry) }
   function vecOf(entry, i) { return Deco.vecOf(entry, i) }
-  function take(text) { reader.deco = Deco.parse(text) }
+  function take(text) { reader.asked = Deco.parse(text) }
+
+  // The titlebar's style, which dock/minimize.lua writes down as it sets it: the
+  // plugin has no way to be asked for its buttons.
+  FileView {
+    id: barNote
+    path: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/omardeck-titlebar.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: barNote.reload()
+    onLoaded: reader.barStyle = Deco.barStyle(barNote.text())
+    onLoadFailed: reader.barStyle = ({})
+  }
 
   function read() {
     if (!readDeco.running) readDeco.running = true

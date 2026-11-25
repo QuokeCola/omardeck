@@ -28,10 +28,12 @@ Row {
   }
   function toggle() { opened ? close() : open() }
 
+  // Always there, shown or not: it is also what tells the service what was
+  // chosen, and the Omarchy menu changes those settings too (bin/omardeck-menu).
   Loader {
     id: overviewLoader
-    active: root.overviewButton
-    visible: active
+    active: true
+    visible: root.overviewButton
     sourceComponent: Overview.Panel {
       bar: root.bar
       moduleName: root.moduleName

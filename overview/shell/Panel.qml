@@ -58,7 +58,53 @@ Panel {
     root.service.liquidGlass = root.liquidGlass
   }
   onServiceChanged: root.pushSettings()
-  onFrostChanged: root.pushSettings()
+  onFrostChanged: { root.pushSettings(); root.syncSystemGlass() }
+
+  // ------------------------------------------------------- the system's glass
+  // Frosted glass is one setting with Omarchy's own Window Opacity (Appearance >
+  // Windows in its menu, omarchy-hyprland-window-transparency): "glassy" there is
+  // the frost here. Glassy is what blurs behind see-through windows and gives the
+  // terminals their see-through background, so the switch here turns all of it on
+  // and off together, and a change made in Omarchy's menu shows here.
+  //
+  // Omarchy's side is read at the start and after every Hyprland reload, which
+  // its command ends with, and is the one that is right when the two differ: it
+  // is what is on screen. Turning the frost off goes back to whichever of
+  // Omarchy's other two (opaque, transparent) was last seen, kept as `frostOff`.
+  // Without that command (an older Omarchy) none of this happens.
+  readonly property string glassCommand: "omarchy-hyprland-window-transparency"
+  // What Omarchy last said: "opaque", "transparent", "glassy", or "" for not known.
+  property string systemGlass: ""
+  Process {
+    id: readGlass
+    command: [root.glassCommand]
+    stdout: StdioCollector { onStreamFinished: root.tookSystemGlass(String(text || "").trim()) }
+  }
+  Process {
+    id: writeGlass
+    onExited: readGlass.running = true
+  }
+  function readSystemGlass() { if (!readGlass.running && !writeGlass.running) readGlass.running = true }
+  function tookSystemGlass(mode) {
+    if (!root.settled || !/^(opaque|transparent|glassy)$/.test(mode)) return
+    root.systemGlass = mode
+    if (mode !== "glassy" && root.setting("frostOff", "transparent") !== mode) root.setSetting("frostOff", mode)
+    if ((mode === "glassy") !== root.frost) root.setSetting("frost", mode === "glassy")
+  }
+  function syncSystemGlass() {
+    if (root.systemGlass === "" || writeGlass.running) return
+    if (root.frost === (root.systemGlass === "glassy")) return
+    const off = root.setting("frostOff", "transparent")
+    writeGlass.command = [root.glassCommand, root.frost ? "glassy" : (off === "opaque" ? "opaque" : "transparent")]
+    root.systemGlass = ""
+    writeGlass.running = true
+  }
+  // Not before the bar has handed over this widget's settings: saving one from
+  // an empty set would write the others away.
+  readonly property bool settled: root.bar !== null && root.settings !== null && root.settings !== undefined && root.moduleName !== ""
+  Timer { interval: 1500; running: root.settled; onTriggered: root.readSystemGlass() }
+  readonly property int reloads: root.service ? root.service.reloads : 0
+  onReloadsChanged: root.readSystemGlass()
   onDeskSwipeChanged: root.pushSettings()
   onSyncScreensChanged: root.pushSettings()
   onLiquidGlassChanged: root.pushSettings()
@@ -389,7 +435,7 @@ Panel {
         Toggle {
           width: parent.width
           label: "Frosted glass"
-          description: "Blur behind see-through windows, the way Hyprland does, and behind this panel and the notification sheet. Uses more GPU."
+          description: "Glassy windows, as in Omarchy's Appearance menu: blur behind see-through windows and terminals, this panel and the notification sheet. Uses more GPU."
           checked: root.frost
           hasCursor: root.cursor === "frost"
           foreground: root.bar.foreground

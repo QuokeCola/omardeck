@@ -21,7 +21,7 @@ Item {
     visible: card.barH > 0.5 && card.radius > 0.5
     width: card.width
     height: card.radius
-    color: overlay.deco.barColor
+    color: card.focusedWindow ? overlay.deco.barColor : overlay.deco.barColorInactive
     opacity: card.real.opacity ?? 1
   }
 

@@ -151,7 +151,7 @@ const tests = {
   },
 
   "deco: every option in the batch has a say, defaults stand for nothing"() {
-    assert.strictEqual(Deco.OPTIONS.length, 39);
+    assert.strictEqual(Deco.OPTIONS.length, 41);
     const none = Deco.parse("");
     assert.strictEqual(none.rounding, 0);
     assert.strictEqual(none.blurPasses, 1);

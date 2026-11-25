@@ -9,6 +9,14 @@
 // The original keeps doing stencil/discard setup, so shaped (ignore_alpha)
 // layer surfaces only get glass under their opaque parts.
 
+// The genie reaches into a render pass's list (genie.inc, "Decorations that miss
+// the window's own buffer"), which the class keeps to itself.
+// Everything that header pulls in comes first, as it is.
+#include <hyprland/src/defines.hpp>
+#include <hyprland/src/render/pass/PassElement.hpp>
+#define private public
+#include <hyprland/src/render/pass/Pass.hpp>
+#undef private
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
@@ -48,13 +56,14 @@ static SP<CShader>    g_shader;
 static bool           g_shaderFailed = false;
 static std::map<std::string, uint64_t> g_stats;  // glass draws per surface, for `hyprctl liquidglass`
 static SP<SHyprCtlCommand>             g_ctlCmd;
+static SP<SHyprCtlCommand>             g_genieCmd;
 
 static struct {
     GLint uvTL, uvBR, boxSize, radius, alpha, bezel, refraction, dispersion, specular, lightDir, brightness, saturation, shapeMode, surf, alphaCut;
 } g_loc;
 
 static struct {
-    SP<Config::Values::CBoolValue>  enabled, windows, layers, shapeLayers;
+    SP<Config::Values::CBoolValue>  enabled, windows, layers, shapeLayers, genie, genieFlip, fade;
     SP<Config::Values::CFloatValue> bezel, refraction, dispersion, specular, lightAngle, brightness, saturation;
     SP<Config::Values::CIntValue>   blurSize, blurPasses;
 } g_cfg;
@@ -81,6 +90,20 @@ void main() {
 static const char* FRAG =
 #include "glass.frag.inc"
     ;
+
+// For a pass from one monitor-sized buffer to another: the corners as they are.
+static const char* VERT_PLAIN = R"GLSL(#version 300 es
+in vec2 pos;
+in vec2 texcoord;
+out vec2 v_texcoord;
+void main() {
+    gl_Position = vec4(pos * 2.0 - 1.0, 0.0, 1.0);
+    v_texcoord = texcoord;
+}
+)GLSL";
+
+#include "genie.inc"
+#include "buttons.inc"
 
 static bool ensureShader() {
     if (g_shader)
@@ -261,7 +284,9 @@ static bool coversMonitor(const STexData& data, const CBox& box) {
 }
 
 static void hkRenderTextureWithBlurInternal(CHyprOpenGLImpl* thisptr, SP<ITexture> tex, const CBox& box, const STexData& data) {
-    bool glass = data.blurredBG && wantsGlass(data) && ensureShader();
+    // A window being bent (genie.inc) has a matte for where its blur goes, which
+    // the lens knows nothing of: that one keeps Hyprland's own blur.
+    bool glass = data.blurredBG && !data.blurAlphaMatte && wantsGlass(data) && ensureShader();
     g_pendingShape.reset();
     if (glass && coversMonitor(data, box)) {
         // shape from alpha needs a plain 2D RGBA texture; otherwise keep stock blur
@@ -275,6 +300,12 @@ static void hkRenderTextureWithBlurInternal(CHyprOpenGLImpl* thisptr, SP<ITextur
     if (glass)
         g_pendingBG = data.blurredBG.get();
     ((FnBlur)g_hookBlur->m_original)(thisptr, tex, box, data);
+    // Hyprland cuts a blur to its surface's shape with the stencil and leaves
+    // the stencil write-protected after. The titlebar hides the part of itself
+    // that runs under a rounded window with the stencil too, and does not
+    // unprotect it first: the first bar drawn after such a blur (the bottom
+    // window's) then showed a strip of bar through a see-through window.
+    glStencilMask(0xFF);
     if (g_pendingBG)
         g_stats["unmatched"]++;  // the original never drew blurredBG through renderTextureInternal
     g_pendingBG = nullptr;
@@ -352,7 +383,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         return v;
     };
 
-    g_cfg.enabled    = addB("plugin:liquidglass:enabled", "turn the glass pass on/off", true);
+    g_cfg.enabled    = addB("plugin:liquidglass:enabled", "turn the glass pass on/off", false);
     g_cfg.windows    = addB("plugin:liquidglass:windows", "apply to blurred windows", true);
     g_cfg.layers     = addB("plugin:liquidglass:layers", "apply to blurred layer surfaces", true);
     g_cfg.shapeLayers = addB("plugin:liquidglass:shape_layers", "full-screen layers: follow the card's alpha outline (false = plain blur)", true);
@@ -369,6 +400,26 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_hookBlur = hookMember("renderTextureWithBlurInternal", (void*)&hkRenderTextureWithBlurInternal);
     g_hookTex  = hookMember("renderTextureInternal", (void*)&hkRenderTextureInternal);
     g_hookRadius = hookMember("oneBlurRadius", (void*)&hkOneBlurRadius, "Render::CRenderPass");
+
+    g_cfg.genie     = addB("plugin:liquidglass:genie", "pour windows into the dock (hyprctl genie)", true);
+    g_cfg.genieFlip = addB("plugin:liquidglass:genie_flip", "the genie pours upward: flip it", false);
+    g_cfg.fade      = addB("plugin:liquidglass:fade_under_fullscreen", "fade windows out under a maximized one instead of cutting them", true);
+    // Not worth failing the whole plugin over: without them the cut stays.
+    try {
+        g_hookFading = hookMember("isFadingOutUnderFullscreen", (void*)&hkIsFadingOutUnderFullscreen, "Desktop::View::CWindow");
+        g_hookOver   = hookMember("shouldRenderOverFullscreen", (void*)&hkShouldRenderOverFullscreen, "Desktop::View::CWindow");
+    } catch (...) {
+        if (g_hookFading)
+            g_hookFading->unhook();
+        g_hookFading = g_hookOver = nullptr;
+    }
+    try {
+        g_hookCapture = hookMember("renderWindow", (void*)&hkCaptureRenderWindow, "Screenshare::CScreenshareFrame");
+    } catch (...) { g_hookCapture = nullptr; }
+    Buttons::init();
+    g_genieCmd = HyprlandAPI::registerHyprCtlCommand(handle, SHyprCtlCommand{.name = "genie", .exact = false, .fn = [](eHyprCtlOutputFormat, std::string request) {
+        return Genie::command(request);
+    }});
 
     // A reload puts the file's blur back: that's the user's now, so save it and
     // override it again — after the reload is done, not from inside it.
@@ -394,6 +445,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
+    Genie::exit();
+    Buttons::exit();
     g_applyLater.reset();
     g_reloadListener.reset();
     restoreBlur();

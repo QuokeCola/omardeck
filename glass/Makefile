@@ -6,10 +6,10 @@ CXXFLAGS += $(shell pkg-config --cflags $(PKGS))
 
 all: liquidglass.so
 
-liquidglass.so: src/main.cpp src/glass.frag.inc
+liquidglass.so: src/main.cpp src/genie.inc src/buttons.inc src/glass.frag.inc src/genie.frag.inc
 	$(CXX) $(CXXFLAGS) src/main.cpp -o $@ $(shell pkg-config --libs $(PKGS)) -lGLESv2
 
-src/glass.frag.inc: src/glass.frag
+src/%.frag.inc: src/%.frag
 	{ echo 'R"GLSL('; cat $<; echo ')GLSL"'; } > $@
 
 # Hyprland never really unloads a plugin's library, so loading the same path
@@ -30,6 +30,6 @@ unload:
 	-rm -f "$$(cat $(LOADED) 2>/dev/null)" $(LOADED)
 
 clean:
-	rm -f liquidglass.so src/glass.frag.inc
+	rm -f liquidglass.so src/glass.frag.inc src/genie.frag.inc
 
 .PHONY: all clean reload unload

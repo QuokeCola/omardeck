@@ -24,6 +24,11 @@ Item {
 
   onWantChanged: glass.apply()
 
+  // The plugin is wanted with the glass off too: it also pours windows into the
+  // dock and fades the ones under a maximized window (glass/src/genie.inc). So
+  // it is seen to once at the start, whatever the switch says.
+  Timer { interval: 1500; running: true; onTriggered: glass.apply() }
+
   function apply() {
     if (glassProc.running) {
       glass.again = true

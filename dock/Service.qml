@@ -194,7 +194,11 @@ Item {
     target: Hyprland
     function onRawEvent(event) {
       var n = event.name
-      if (n === "openlayer" && String(event.data).trim() === "omarchy-aerial") root.restack()
+      if (n === "genie") {
+        var said = String(event.data).trim().split(",")
+        if (said[0] === "out") root.genieLanded(said[1])
+      }
+      else if (n === "openlayer" && String(event.data).trim() === "omarchy-aerial") root.restack()
       else if (root.refreshEvents.indexOf(n) >= 0) root.refresh()
     }
   }
@@ -552,9 +556,20 @@ Item {
       barH: deco && deco.bars ? deco.barHeight : 0,
       barColor: deco ? deco.barColor : "transparent",
       rounding: deco ? deco.rounding : 0,
-      deco: deco, title: root.nameFor(root.keyOfWindow(win.address))
+      deco: deco, title: root.nameFor(root.keyOfWindow(win.address)),
+      address: win.address, scale: mon.scale > 0 ? mon.scale : 1
     }
   }
+  // The genie changes the window and its picture over behind a cover, and holds
+  // the cover until the window is seen to have moved (Genie.qml): seen here, in
+  // the windows as Hyprland last reported them.
+  function genieWatch() {
+    if (genie.awaiting === "") return
+    var win = root.clientAt(genie.address)
+    if (!win) { genie.confirm(); return }
+    if ((genie.awaiting === "gone") === root.isMinimized(win)) genie.confirm()
+  }
+  onClientsChanged: root.genieWatch()
   function setNoAnim(addr, on) {
     root.hypr('hl.dsp.window.set_prop({ prop = "no_anim", value = "' + (on ? "1" : "unset") + '", window = "address:' + addr + '" })')
   }
@@ -575,7 +590,9 @@ Item {
       job.ready = function() { root.setNoAnim(address, true); root.stockMinimize(address) }
       job.fallback = function() { root.stockMinimize(address) }
       job.done = function() { restoreSettle.targets = restoreSettle.targets.concat(['window = "address:' + address + '"']); restoreSettle.restart() }
-      genie.play(job)
+      // Hyprland bends the window itself when it can; the picture is for when it
+      // can't. Either way the window is taken away once it is in the icon.
+      root.compositorGenie("out", job, function() { job.ready(); job.done() }, function() { genie.play(job) })
       return "ok"
     }
     // Bring a minimized window back, as a click on its icon does.
@@ -607,7 +624,63 @@ Item {
     job.minimizing = false
     job.done = function() { root.placeWindow(win, workspace) }
     job.fallback = job.done
-    genie.play(job)
+    // Armed first, so the window is already being poured the first time
+    // Hyprland draws it back on the desktop.
+    root.compositorGenie("in", job, job.done, function() { genie.play(job) })
+  }
+
+  // The genie as Hyprland's own (glass/src/genie.inc): the window itself is bent,
+  // live, with its frost and shadow, so there is no picture to change places
+  // with. `then` runs when the window is in the icon ("out") or as soon as it is
+  // armed ("in"); `otherwise` when the plugin is not there to do it.
+  readonly property bool genieInCompositor: root.overview && root.overview.deco && root.overview.deco.genie === true
+  property var genieWaits: ({})
+  function compositorGenie(way, job, then, otherwise) {
+    if (!root.genieInCompositor || genieCmd.running) { otherwise(); return }
+    var s = job.sink
+    var ms = Math.max(1, Style.duration(genie.duration))
+    genieCmd.way = way
+    genieCmd.address = job.address
+    genieCmd.then = then
+    genieCmd.otherwise = otherwise
+    genieCmd.ms = ms
+    genieCmd.command = ["/usr/bin/hyprctl", "genie", way, job.address,
+      String(Math.round(s.x)), String(Math.round(s.x + s.width)), String(Math.round(s.y + s.height)), String(Math.round(ms))]
+    genieCmd.running = true
+  }
+  Process {
+    id: genieCmd
+    property string way: ""
+    property string address: ""
+    property var then: null
+    property var otherwise: null
+    property real ms: 500
+    stdout: StdioCollector { id: genieSaid }
+    onExited: (code) => {
+      var ok = code === 0 && String(genieSaid.text || "").trim() === "ok"
+      var then = genieCmd.then, otherwise = genieCmd.otherwise
+      genieCmd.then = null
+      genieCmd.otherwise = null
+      if (!ok) { if (otherwise) otherwise(); return }
+      if (genieCmd.way === "in") { if (then) then(); return }
+      // "out": the plugin says when the window is in (the `genie` event below),
+      // and if it never does the window is taken anyway.
+      var waits = Object.assign({}, root.genieWaits)
+      waits[genieCmd.address] = then
+      root.genieWaits = waits
+      genieOverdue.address = genieCmd.address
+      genieOverdue.interval = genieCmd.ms + 500
+      genieOverdue.restart()
+    }
+  }
+  Timer { id: genieOverdue; property string address: ""; onTriggered: root.genieLanded(address) }
+  function genieLanded(address) {
+    var then = root.genieWaits[address]
+    if (!then) return
+    var waits = Object.assign({}, root.genieWaits)
+    delete waits[address]
+    root.genieWaits = waits
+    then()
   }
   function placeWindow(win, workspace) {
     var target = 'window = "address:' + win.address + '"'

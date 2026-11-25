@@ -1,0 +1,69 @@
+#!/bin/bash
+
+# Omardeck's switches in the Omarchy menu.
+#
+# Omarchy keeps its settings in its menu (Appearance), and lets the user add rows
+# to it in ~/.config/omarchy/extensions/omarchy-menu.jsonc. This puts Omardeck's
+# liquid glass there, beside Window Opacity, so it is set where the rest of the
+# look is. Frosted glass needs no row: it is Omarchy's own Glassy Windows, which
+# Omardeck's switch follows and sets (overview/shell/Panel.qml). The rows only read
+# and write Omardeck's own settings (omarchy-bar get/set), the ones its panel shows.
+#
+#   omardeck-menu install     add the rows (again is harmless)
+#   omardeck-menu remove      take them out
+#   omardeck-menu status      "installed" or "absent"
+#   omardeck-menu first-run   once per user: install, and open the menu there
+#
+# Every line this writes ends in the marker below, and only those are removed.
+
+set -uo pipefail
+
+MARK="// omardeck"
+ID=quokecola.omardeck
+FILE=${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/extensions/omarchy-menu.jsonc
+STATE=${XDG_STATE_HOME:-$HOME/.local/state}/omardeck/menu-offered
+
+rows() {
+  local get="omarchy-bar get $ID" set="omarchy-bar set $ID"
+  cat <<ROWS
+  "appearance.windows.omardeck-liquid-on": {"icon":"󰖌","label":"Liquid Glass On","description":"A lens at the edge of whatever is frosted","when":"[[ \$($get frost) != false && \$($get liquidGlass) != true ]]","action":"$set liquidGlass true --json"}, $MARK
+  "appearance.windows.omardeck-liquid-off": {"icon":"󰖌","label":"Liquid Glass Off","description":"A lens at the edge of whatever is frosted","when":"[[ \$($get frost) != false && \$($get liquidGlass) == true ]]","action":"$set liquidGlass false --json"}, $MARK
+ROWS
+}
+
+installed() { [[ -f $FILE ]] && grep -qF "$MARK" "$FILE"; }
+
+remove() {
+  installed || return 0
+  local tmp
+  tmp=$(mktemp "$FILE.XXXXXX") || return 1
+  grep -vF "$MARK" "$FILE" >"$tmp" && cat "$tmp" >"$FILE"
+  rm -f "$tmp"
+}
+
+install() {
+  remove || return 1
+  mkdir -p "$(dirname "$FILE")"
+  [[ -s $FILE ]] || printf '{\n}\n' >"$FILE"
+  # Before the brace that closes the file: the last line that is only a brace.
+  local last tmp
+  last=$(grep -n '^[[:space:]]*}[[:space:]]*$' "$FILE" | tail -1 | cut -d: -f1)
+  [[ -n $last ]] || { echo "No closing brace in $FILE; not touched." >&2; return 1; }
+  tmp=$(mktemp "$FILE.XXXXXX") || return 1
+  { head -n $((last - 1)) "$FILE"; rows; tail -n +"$last" "$FILE"; } >"$tmp" && cat "$tmp" >"$FILE"
+  rm -f "$tmp"
+}
+
+case ${1:-status} in
+  install) install ;;
+  remove) remove ;;
+  status) installed && echo installed || echo absent ;;
+  first-run)
+    [[ -e $STATE ]] && exit 0
+    mkdir -p "$(dirname "$STATE")" && : >"$STATE"
+    install || exit 1
+    command -v notify-send >/dev/null && notify-send -a Omardeck "Omardeck is set up" "Glassy windows and liquid glass are in the Omarchy menu, under Appearance › Windows, and in Omardeck's panel on the bar."
+    command -v omarchy-menu >/dev/null && omarchy-menu summon appearance.windows
+    ;;
+  *) echo "usage: omardeck-menu install|remove|status|first-run" >&2; exit 2 ;;
+esac

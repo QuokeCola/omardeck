@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import "overview/shell" as Overview
 import "notifications" as Notifications
 import "dock" as Dock
@@ -47,5 +48,17 @@ Item {
     id: dock
     shell: root.shell
     overview: root.overview
+  }
+
+  // Once per user: the glass switches are put in the Omarchy menu, where the
+  // rest of the look is set, and the menu is opened there (bin/omardeck-menu).
+  // After the shell has settled, so the menu is there to be opened.
+  Timer {
+    interval: 4000
+    running: true
+    onTriggered: {
+      const url = Qt.resolvedUrl("bin/omardeck-menu").toString()
+      Quickshell.execDetached([url.startsWith("file://") ? url.slice(7) : url, "first-run"])
+    }
   }
 }

@@ -46,6 +46,15 @@ Item {
   // How many screens over this card's desktop is while sliding.
   readonly property real lane: surface.following ? overlay.laneOf(overlay.wsOf(card.modelData)) : 0
   readonly property real shift: surface.sliding && card.tracking ? card.lane * surface.width : 0
+  // The card stands in a page of its own, the size of the screen, which is what
+  // slides and what it is cut to (see `cardDelegate` in SurfaceStage.qml): a
+  // window that hangs off the edge of its desktop is off screen there, and has
+  // no business over the desktop sliding in beside it. `carried` is how far the
+  // page has taken it, which its own `x` then leaves out. Picked up or thrown, it
+  // is anywhere on the screen and the page stays put.
+  readonly property real carried: card.dragging || card.flying ? 0 : card.shift
+  // Where it is on the screen, page and all: `x` is within the page.
+  readonly property real stageX: card.x + card.carried
   // Searching or showing one app's windows, cards from every desktop
   // share the spread, but closing lands on one desktop. The others leave
   // toward their own desktop's side as the overview closes (and come in
@@ -94,7 +103,7 @@ Item {
     const h = card.height * card.scale
     const ox = surface.monitor ? surface.monitor.x : 0
     const oy = surface.monitor ? surface.monitor.y : 0
-    return Qt.rect(ox + card.x + (card.width - w) / 2, oy + card.y + (card.height - h) / 2, w, h)
+    return Qt.rect(ox + card.stageX + (card.width - w) / 2, oy + card.y + (card.height - h) / 2, w, h)
   }
   onHeldRectChanged: if (card.dragging) overlay.dragRect = card.heldRect
 
@@ -304,8 +313,8 @@ Item {
   }
   function blend(from, to, k) { return from + (to - from) * k }
 
-  x: card.flying ? card.blend(card.flyFrom.x, card.flyTo.x, card.fly)
-     : (card.back < 1 ? card.blend(card.backFrom.x, card.homeX, card.back) : card.homeX)
+  x: (card.flying ? card.blend(card.flyFrom.x, card.flyTo.x, card.fly)
+      : (card.back < 1 ? card.blend(card.backFrom.x, card.homeX, card.back) : card.homeX)) - card.carried
   y: card.flying ? card.blend(card.flyFrom.y, card.flyTo.y, card.fly)
      : (card.back < 1 ? card.blend(card.backFrom.y, card.homeY, card.back) : card.homeY)
   width: card.flying ? card.blend(card.flyFrom.width, card.flyTo.width, card.fly)
@@ -502,7 +511,7 @@ Item {
 
     onCentroidChanged: {
       if (!dragger.active) return
-      card.lastDrag = Qt.rect(card.x, card.y, card.width, card.height)
+      card.lastDrag = Qt.rect(card.stageX, card.y, card.width, card.height)
       const at = dragger.centroid.scenePosition
       // Still this surface's, even off its edge: the pointer stays with
       // where the button went down. Over another screen, that screen's

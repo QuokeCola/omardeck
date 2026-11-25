@@ -252,6 +252,8 @@ Item {
   // Frost see-through windows' cards with Hyprland's own blur, live. Set from
   // the settings panel; it costs GPU time while the overview is up.
   property bool frost: true
+  // Counts Hyprland's config reloads, for whoever has something to read again.
+  property int reloads: 0
 
   // Liquid glass, set from the settings panel. See GlassControl.qml.
   GlassControl {
@@ -379,9 +381,15 @@ Item {
       }
 
       if (name === "configreloaded") {
+        service.reloads++
         // A reload drops runtime gestures the same way it drops runtime binds.
         gestures.loadSoon()
         service.readDecoration()
+        // A theme change reloads Hyprland and moves the wallpaper's link, in
+        // either order: looked up now and once more when it has settled, so the
+        // first overview after it is not on the last theme's wallpaper.
+        service.findTheWallpaper()
+        wallpaperSettle.restart()
         // And it puts the glass plugin's options back to their defaults. Its
         // default is on, so a loaded plugin is told right away that the glass
         // is off, rather than showing for as long as `loadSoon` waits.
@@ -403,6 +411,8 @@ Item {
       if (service.stirring.indexOf(name) >= 0) freshen.restart()
     }
   }
+
+  Timer { id: wallpaperSettle; interval: 2500; onTriggered: if (!service.showing) service.findTheWallpaper() }
 
   Timer {
     id: freshen

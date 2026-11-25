@@ -128,7 +128,7 @@ Item {
           readonly property real above: margin + (level.cardItem ? level.cardItem.barH : 0)
           visible: level.cardItem !== null
           sourceItem: level.cardItem
-          x: level.cardItem ? level.cardItem.x - margin : 0
+          x: level.cardItem ? level.cardItem.stageX - margin : 0
           y: level.cardItem ? level.cardItem.y - above : 0
           width: level.cardItem ? level.cardItem.width + 2 * margin : 0
           height: level.cardItem ? level.cardItem.height + above + margin : 0
